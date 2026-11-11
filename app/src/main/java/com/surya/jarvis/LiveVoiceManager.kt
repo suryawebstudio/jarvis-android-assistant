@@ -201,16 +201,10 @@ class LiveVoiceManager(
             text: String
         ) {
             try {
-            status("GOOGLE RESPONSE: ${text.take(300)}")
                 val json = JSONObject(text)
 
                 if (json.has("error")) {
-                    fail(
-                        "GEMINI ERROR: ${
-                            json.optJSONObject("error")?.optString("message")
-                                ?: json.optString("error")
-                        }"
-                    )
+                    fail("LIVE SERVICE ERROR — PLEASE TRY AGAIN")
                     return
                 }
 
@@ -260,7 +254,7 @@ class LiveVoiceManager(
                 }
 
             } catch (e: Exception) {
-                status("RESPONSE ERROR: ${e.message}")
+                status("LIVE RESPONSE COULD NOT BE PROCESSED")
             }
         }
 
