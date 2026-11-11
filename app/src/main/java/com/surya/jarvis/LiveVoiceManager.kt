@@ -330,7 +330,9 @@ class LiveVoiceManager(
                 context.getSystemService(Context.AUDIO_SERVICE)
                     as AudioManager
 
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            // Keep output on Android's normal media route so volume buttons
+            // control JARVIS playback with the media/music volume stream.
+            audioManager.mode = AudioManager.MODE_NORMAL
 
             recorder.startRecording()
 
@@ -418,7 +420,7 @@ class LiveVoiceManager(
                         .setAudioAttributes(
                             AudioAttributes.Builder()
                                 .setUsage(
-                                    AudioAttributes.USAGE_VOICE_COMMUNICATION
+                                    AudioAttributes.USAGE_MEDIA
                                 )
                                 .setContentType(
                                     AudioAttributes.CONTENT_TYPE_SPEECH
