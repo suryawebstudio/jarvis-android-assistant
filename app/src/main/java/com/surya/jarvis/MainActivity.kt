@@ -1,7 +1,12 @@
 package com.surya.jarvis
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
+import android.os.Build
+import android.provider.Settings
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -15,7 +20,6 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var voiceManager: LiveVoiceManager
 
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -29,11 +33,40 @@ class MainActivity : AppCompatActivity() {
             ActivityResultContracts.RequestPermission()
         ) { granted ->
             if (granted) {
-                beginVoiceConversation()
+                requestNotificationThenStartVoice()
             } else {
                 binding.statusText.text = "MICROPHONE PERMISSION DENIED"
             }
         }
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) {
+            beginVoiceConversation()
+        }
+
+    private val voiceReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            when (intent?.action) {
+                JarvisVoiceForegroundService.ACTION_STATUS -> {
+                    val status = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_STATUS).orEmpty()
+                    if (status.isNotBlank()) binding.statusText.text = status
+                    if (status == "VOICE MODE OFF") {
+                        voiceMode = false
+                        binding.micButton.text = "MIC - TAP TO SPEAK"
+                    }
+                }
+
+                JarvisVoiceForegroundService.ACTION_USER_SPEECH -> {
+                    val spokenText = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_SPEECH).orEmpty()
+                    if (spokenText.isNotBlank()) {
+                        binding.chatHistory.append("\n\nYOU:\n$spokenText")
+                    }
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,23 +76,13 @@ class MainActivity : AppCompatActivity() {
 
         setSupportActionBar(binding.toolbar)
 
-        voiceManager = LiveVoiceManager(
-            this,
-            onUserSpeech = { spokenText ->
-                runOnUiThread {
-                    binding.chatHistory.append(
-                        "\n\nYOU:\n$spokenText"
-                    )
-                }
-            },
-            onStatus = { status ->
-                runOnUiThread {
-                    binding.statusText.text = status
-                }
-            }
-        )
-
-        binding.statusText.text = "SYSTEM ONLINE"
+        if (JarvisVoiceForegroundService.isRunning) {
+            voiceMode = true
+            binding.micButton.text = "STOP VOICE"
+            binding.statusText.text = "JARVIS LISTENING IN BACKGROUND"
+        } else {
+            binding.statusText.text = "SYSTEM ONLINE"
+        }
 
         binding.chatButton.setOnClickListener {
             val visible =
@@ -85,7 +108,7 @@ class MainActivity : AppCompatActivity() {
         binding.micButton.setOnClickListener {
             if (voiceMode) {
                 voiceMode = false
-                voiceManager.stop()
+                JarvisVoiceForegroundService.stop(this)
 
                 binding.micButton.text = "MIC - TAP TO SPEAK"
                 binding.statusText.text = "VOICE MODE OFF"
@@ -96,7 +119,7 @@ class MainActivity : AppCompatActivity() {
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    beginVoiceConversation()
+                    requestNotificationThenStartVoice()
                 } else {
                     micPermissionLauncher.launch(
                         Manifest.permission.RECORD_AUDIO
@@ -106,8 +129,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.settingsButton.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             binding.responseText.text =
-                "JARVIS settings will be developed next."
+                "Enable JARVIS under Downloaded apps in Android Accessibility settings, then return here."
         }
     }
 
@@ -117,7 +141,21 @@ class MainActivity : AppCompatActivity() {
         binding.micButton.text = "STOP VOICE"
         binding.statusText.text = "CONNECTING TO JARVIS LIVE..."
 
-        voiceManager.startListening()
+        JarvisVoiceForegroundService.start(this)
+    }
+
+    private fun requestNotificationThenStartVoice() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            beginVoiceConversation()
+        }
     }
 
     private fun sendMessage() {
@@ -233,9 +271,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter().apply {
+            addAction(JarvisVoiceForegroundService.ACTION_STATUS)
+            addAction(JarvisVoiceForegroundService.ACTION_USER_SPEECH)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(voiceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(voiceReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        unregisterReceiver(voiceReceiver)
+        super.onStop()
+    }
+
     override fun onDestroy() {
-        voiceMode = false
-        voiceManager.release()
         executor.shutdownNow()
         super.onDestroy()
     }

@@ -68,9 +68,21 @@ The Live session now declares and handles two allowlisted Gemini function tools:
 1. **`launch_app(app_name)`** — opens a matching installed app by its visible launcher label.
 2. **`open_settings_page(page)`** — opens one of these Android Settings screens: `general`, `wifi`, `bluetooth`, `display`, `sound`, `apps`, or `location`.
 
-The Android manifest declares visibility for apps matching the launcher intent. It does **not** request `QUERY_ALL_PACKAGES`. The code does not use an Accessibility service, accept arbitrary intents from the model, change Settings values, or interact inside a launched app. Tool calls are sent back to Gemini through a function response so it can speak a follow-up.
+The Android manifest declares visibility for apps matching the launcher intent. It does **not** request `QUERY_ALL_PACKAGES`. The starter launch/settings code does not accept arbitrary intents from the model, change Settings values, or interact inside a launched app. Optional visible-screen interaction is isolated in the user-enabled Accessibility Service described below. Tool calls are sent back to Gemini through a function response so it can speak a follow-up.
 
 The function declaration, Android dispatch, app lookup, and Settings-intent paths passed static checks. They have not yet been verified end-to-end on the user's phone. App labels can differ by device or language, and launching another app may put J.A.R.V.I.S. in the background where Android restricts microphone capture unless a suitable foreground-service design is added.
+
+### Visible-screen Accessibility control
+
+`JarvisAccessibilityService.kt` is now registered as an optional Android Accessibility Service. The user must enable it manually from Android Accessibility settings. When enabled, the Live session exposes `inspect_visible_screen` and `control_visible_screen` tools. The service can inspect accessible labels on the current foreground screen and perform a single visible action: tap/click a visible control, type into a visible editable field, scroll, or invoke Back/Home/recent apps. Sensitive-looking actions require the model to receive explicit user confirmation and repeat the tool call with `confirmed=true`. The service does not bypass passwords, biometrics, CAPTCHAs, permission dialogs, or security screens. This implementation still needs device testing across real apps; custom-drawn or restricted interfaces may expose no accessible controls.
+
+The Live manager now coordinates these calls as a bounded multi-step task. It starts each complex workflow with `start_task`, tracks task steps, allows at most 24 phone-action tool steps per task, resets state when voice mode stops or fails, and exposes `cancel_task` for user stop/cancel/abort requests. The model is instructed to inspect the screen between navigation steps and continue until the requested workflow is complete. Sensitive actions remain blocked until the user explicitly confirms, after which the model may repeat the blocked call with `confirmed=true`.
+
+When a sensitive action is blocked, `LiveVoiceManager` also speaks a local Android Text-to-Speech prompt: the user is told that the action may send, delete, purchase, call, or share something and must say yes to confirm or stop to cancel. This avoids depending solely on Gemini's generated response audio. The TTS engine is stopped and released with the voice manager.
+
+### Background voice listening
+
+Voice mode is owned by `JarvisVoiceForegroundService`, not `MainActivity`, so it can continue while another app is in the foreground. The service starts only from the visible JARVIS activity after microphone permission is granted, declares the Android microphone foreground-service type, shows an ongoing low-priority notification, and provides a notification STOP action. MainActivity receives private in-app broadcasts for status and recognized speech while it is visible, but leaving the activity does not release the voice manager. The user can stop listening from the JARVIS button or the notification. Android may still reclaim services under severe system pressure, and the persistent notification is intentionally required for microphone privacy.
 
 ### GitHub repository
 
@@ -93,11 +105,17 @@ The Android source and README are in `main`. IDE metadata, build outputs, releas
 - Routes output through Android's media audio stream.
 - Processes server-reported interruption events by clearing queued playback.
 - Supports the two narrow phone-control function calls listed above.
+- Supports optional visible-screen control through the user-enabled Accessibility Service.
+- Coordinates continuous multi-step workflows with a 24-step safety limit and cancellation tool.
+- Keeps voice capture alive across other apps through a microphone foreground service and persistent stop notification.
 - Preserves a separate normal text-chat path through the Worker.
 
 ### Not complete or not yet verified
 
 - **Phone-control end-to-end test:** Confirm voice commands actually result in app launches and supported Settings screens on the phone.
+- **Accessibility end-to-end test:** Enable JARVIS under Android Accessibility settings, then test screen inspection, tapping, typing, scrolling, and confirmation-gated actions in several apps.
+- **Multi-step task test:** Try “open WhatsApp, find John, type a message, and send it”; verify JARVIS inspects between steps, stops before Send, resumes only after confirmation, and cancels on “stop”.
+- **Background listening test:** Start voice mode, accept notification permission, open another app, speak a command, verify JARVIS responds, then stop from the notification and verify microphone capture ends.
 - **Barge-in latency test:** Confirm interruption stops speech promptly on the device. Current local code reacts to the server's interruption event; local voice activity detection could stop playback even earlier.
 - **Build verification in a full Android environment:** The cloud sandbox did not have a usable Java compiler/Android SDK, so an Android APK build could not be completed there. Use Code on the Go on the phone to build.
 - **Visible live transcript/history:** `MainActivity` has a callback prepared for recognized speech, but `LiveVoiceManager` does not yet deliver transcription events to it. Voice turns therefore are not fully shown as chat history.

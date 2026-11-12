@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jarvis</string>
+    <string name="accessibility_service_description">Lets JARVIS inspect and control visible buttons, text fields, and scrollable areas after you explicitly enable it.</string>
 
 </resources>

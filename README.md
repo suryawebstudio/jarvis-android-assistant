@@ -16,7 +16,15 @@ See [`PROJECT_HANDOVER.md`](PROJECT_HANDOVER.md) for the architecture, work comp
 
 ## Limited phone control
 
-The Live session can request two allowlisted actions: launch an installed app by its visible name, or open one of the supported Android Settings pages (general, Wi-Fi, Bluetooth, display, sound, apps, or location). The app does not use an Accessibility service or `QUERY_ALL_PACKAGES`, and it does not change settings or interact inside launched apps.
+The Live session can request two allowlisted actions: launch an installed app by its visible name, or open one of the supported Android Settings pages (general, Wi-Fi, Bluetooth, display, sound, apps, or location). These starter actions do not change settings or interact inside launched apps, and the app does not request `QUERY_ALL_PACKAGES`.
+
+## Visible-screen control
+
+J.A.R.V.I.S. now includes an optional `JarvisAccessibilityService`. After the user manually enables it in Android Accessibility settings, Gemini can inspect the currently visible accessible labels and perform one narrow action at a time: tap a visible control, type into a visible text field, scroll, or use Back/Home/recent apps. The service does not access hidden content or bypass passwords, biometrics, CAPTCHAs, permission dialogs, or security screens. Consequential actions such as sending, deleting, purchasing, calling, or sharing require explicit confirmation in the conversation.
+
+The Live session also coordinates these calls as a bounded multi-step task. It starts each complex workflow with `start_task`, performs one action at a time, inspects the screen between navigation steps, stops after 24 tool steps to prevent loops, and exposes `cancel_task` for “stop”, “cancel”, or “abort” commands. A sensitive final action such as tapping Send is blocked until JARVIS asks for confirmation and the user explicitly agrees. The Android client also uses local Text-to-Speech to speak the confirmation request, so the prompt is audible even when the model's response audio is unavailable.
+
+Voice mode now runs in `JarvisVoiceForegroundService`. After microphone permission and the Android notification permission are granted, pressing the voice button starts a persistent microphone foreground service with an ongoing notification and a STOP action. JARVIS continues listening while another app is in front. Stop it from the JARVIS button or the notification; Android may still stop background work under extreme system conditions, and Android requires the visible notification for microphone privacy.
 
 ## Open in AndroidIDE
 

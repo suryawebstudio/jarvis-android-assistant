@@ -14,6 +14,7 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
@@ -55,6 +56,7 @@ class LiveVoiceManager(
 
         private const val INPUT_RATE = 16000
         private const val OUTPUT_RATE = 24000
+        private const val MAX_TASK_STEPS = 24
     }
 
     private val client = OkHttpClient.Builder()
@@ -66,6 +68,23 @@ class LiveVoiceManager(
     private val playbackGeneration = AtomicInteger(0)
     private val playbackQueue = LinkedBlockingDeque<PlaybackChunk>(16)
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var taskActive = false
+    private var taskStepCount = 0
+    private var awaitingTaskConfirmation = false
+
+    private var textToSpeech: TextToSpeech? = null
+    @Volatile
+    private var speechReady = false
+
+    init {
+        textToSpeech = TextToSpeech(context.applicationContext) { result ->
+            speechReady = result == TextToSpeech.SUCCESS
+            if (speechReady) {
+                textToSpeech?.language = Locale.getDefault()
+            }
+        }
+    }
 
     @Volatile
     private var setupComplete = false
@@ -182,8 +201,13 @@ class LiveVoiceManager(
                                             "Be concise unless more detail is needed. " +
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. " +
-                                            "Use the provided functions for those actions, and never claim an action succeeded unless its function response says it did. " +
-                                            "Do not attempt any other phone control."
+                                            "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools. " +
+                                            "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
+                                            "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
+                                            "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
+                                            "When a tool response says confirmation is required, the Android app has already spoken the confirmation prompt; do not repeat a long confirmation speech, and wait for the user's answer. " +
+                                            "If the user says stop, cancel, or abort, call cancel_task immediately. " +
+                                            "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens."
                                         )
                                     )
                                 )
@@ -350,10 +374,55 @@ class LiveVoiceManager(
             )
         }
 
+        val inspectScreen = JSONObject().apply {
+            put("name", "inspect_visible_screen")
+            put(
+                "description",
+                "Read accessible labels and text currently visible on the foreground screen. Use this before interacting when the target is unclear."
+            )
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
+        val controlScreen = JSONObject().apply {
+            put("name", "control_visible_screen")
+            put(
+                "description",
+                "Perform one narrow action on the current visible screen: tap a visible control, type into a visible text field, scroll, or use Back, Home, or recent apps. Accessibility must be enabled by the user."
+            )
+            put(
+                "parameters",
+                JSONObject().apply {
+                    put("type", "OBJECT")
+                    put(
+                        "properties",
+                        JSONObject()
+                            .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("type").put("scroll").put("back").put("home").put("overview")))
+                            .put("target", JSONObject().put("type", "STRING").put("description", "Exact or partial visible button, link, label, or text-field label. Leave blank for navigation actions or the focused field."))
+                            .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type."))
+                            .put("direction", JSONObject().put("type", "STRING").put("enum", JSONArray().put("up").put("down")))
+                            .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
+                    )
+                    put("required", JSONArray().put("action"))
+                }
+            )
+        }
+
+        val cancelTask = JSONObject().apply {
+            put("name", "cancel_task")
+            put("description", "Stop the current multi-step JARVIS task and clear its task state. Use when the user says stop, cancel, or abort.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
+        val startTask = JSONObject().apply {
+            put("name", "start_task")
+            put("description", "Start or reset a new multi-step JARVIS task before executing a complex user request.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings)
+                JSONArray().put(launchApp).put(openSettings).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask)
             )
         )
     }
@@ -370,7 +439,7 @@ class LiveVoiceManager(
                 val name = call.optString("name")
                 val id = call.optString("id")
                 val args = call.optJSONObject("args") ?: JSONObject()
-                val outcome = executePhoneTool(name, args)
+                val outcome = executeTaskTool(name, args)
 
                 val functionResponse = JSONObject().apply {
                     if (id.isNotBlank()) put("id", id)
@@ -397,11 +466,114 @@ class LiveVoiceManager(
         }
     }
 
+    private fun executeTaskTool(name: String, args: JSONObject): Pair<Boolean, String> {
+        if (name == "start_task") {
+            clearTaskState()
+            taskActive = true
+            status("TASK STARTED")
+            return true to "A new multi-step task has started."
+        }
+
+        if (name == "cancel_task") {
+            clearTaskState()
+            status("TASK CANCELLED")
+            return true to "The current JARVIS task was cancelled."
+        }
+
+        if (name == "inspect_visible_screen") {
+            return executePhoneTool(name, args)
+        }
+
+        if (!isTaskAction(name)) {
+            return executePhoneTool(name, args)
+        }
+
+        if (!taskActive) {
+            taskStepCount = 0
+            awaitingTaskConfirmation = false
+            taskActive = true
+        }
+        if (taskStepCount >= MAX_TASK_STEPS) {
+            clearTaskState()
+            status("TASK STOPPED — TOO MANY STEPS")
+            return false to "The task was stopped after $MAX_TASK_STEPS steps to prevent an automation loop."
+        }
+
+        val confirmed = args.optBoolean("confirmed", false)
+        if (confirmed && !awaitingTaskConfirmation) {
+            return false to "Confirmation was not requested for a pending sensitive action. Ask the user before retrying."
+        }
+
+        taskStepCount += 1
+        status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
+        val outcome = executePhoneTool(name, args)
+
+        if (isPotentiallySensitive(name, args) && !confirmed && !outcome.first) {
+            awaitingTaskConfirmation = true
+            status("CONFIRMATION REQUIRED")
+            speakConfirmationRequest()
+        } else if (outcome.first && confirmed) {
+            awaitingTaskConfirmation = false
+        }
+
+        if (!outcome.first && !isPotentiallySensitive(name, args)) {
+            status("TASK STEP FAILED")
+        }
+        return outcome
+    }
+
+    private fun isTaskAction(name: String): Boolean =
+        name == "launch_app" || name == "open_settings_page" || name == "control_visible_screen"
+
+    private fun isPotentiallySensitive(name: String, args: JSONObject): Boolean {
+        if (name != "control_visible_screen") return false
+        val value = listOf(
+            args.optString("action"),
+            args.optString("target"),
+            args.optString("text")
+        ).joinToString(" ").lowercase(Locale.ROOT)
+        return listOf(
+            "send", "submit", "purchase", "buy", "pay", "delete", "remove",
+            "call", "share", "post", "publish", "transfer", "confirm", "install"
+        ).any(value::contains)
+    }
+
+    private fun clearTaskState() {
+        taskActive = false
+        taskStepCount = 0
+        awaitingTaskConfirmation = false
+    }
+
+    private fun speakConfirmationRequest() {
+        val prompt = "This action may send, delete, purchase, call, or share something. Please say yes to confirm, or say stop to cancel."
+        mainHandler.post {
+            if (!speechReady) return@post
+            textToSpeech?.speak(
+                prompt,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "jarvis-confirmation"
+            )
+        }
+    }
+
     private fun executePhoneTool(name: String, args: JSONObject): Pair<Boolean, String> {
         return try {
             when (name) {
                 "launch_app" -> launchInstalledApp(args.optString("app_name"))
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
+                "inspect_visible_screen" -> if (JarvisAccessibilityService.isEnabled()) {
+                    true to JarvisAccessibilityService.inspectScreen()
+                } else {
+                    false to "Accessibility control is not enabled. Enable JARVIS in Android Accessibility settings first."
+                }
+                "control_visible_screen" -> JarvisAccessibilityService.control(
+                    action = args.optString("action"),
+                    target = args.optString("target"),
+                    text = args.optString("text"),
+                    direction = args.optString("direction"),
+                    confirmed = args.optBoolean("confirmed", false)
+                )
                 else -> false to "This phone action is not supported."
             }
         } catch (_: Exception) {
@@ -698,6 +870,7 @@ class LiveVoiceManager(
     private fun fail(message: String) {
         running.set(false)
         setupComplete = false
+        clearTaskState()
         status(message)
 
         try {
@@ -713,6 +886,7 @@ class LiveVoiceManager(
     fun stop() {
         running.set(false)
         setupComplete = false
+        clearTaskState()
 
         try {
             recorderThread?.interrupt()
@@ -764,6 +938,13 @@ class LiveVoiceManager(
 
     fun release() {
         stop()
+        try {
+            textToSpeech?.stop()
+            textToSpeech?.shutdown()
+        } catch (_: Exception) {
+        }
+        textToSpeech = null
+        speechReady = false
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }
