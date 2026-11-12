@@ -12,6 +12,10 @@ Kotlin Android client for a voice assistant using a Cloudflare Worker backend an
 
 `LiveVoiceManager` handles both text and binary WebSocket frames. A setup-only test against the configured Worker and Google Live endpoint returned `setupComplete` as a binary JSON frame; handling that callback allows the app to recognize successful session setup.
 
+## Limited phone control
+
+The Live session can request two allowlisted actions: launch an installed app by its visible name, or open one of the supported Android Settings pages (general, Wi-Fi, Bluetooth, display, sound, apps, or location). The app does not use an Accessibility service or `QUERY_ALL_PACKAGES`, and it does not change settings or interact inside launched apps.
+
 ## Open in AndroidIDE
 
 Use AndroidIDE's **Clone Git repo** option with:
@@ -20,7 +24,7 @@ Use AndroidIDE's **Clone Git repo** option with:
 https://github.com/suryawebstudio/jarvis-android-assistant.git
 ```
 
-This repository is private, so sign in to GitHub in AndroidIDE or otherwise provide GitHub authentication when prompted. After cloning, open/sync the Gradle project and build a debug APK. On a terminal in the project root, use:
+This repository is public. After cloning, open/sync the Gradle project and build a debug APK. On a terminal in the project root, use:
 
 ```sh
 bash ./gradlew assembleDebug

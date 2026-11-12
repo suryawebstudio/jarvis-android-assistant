@@ -1,6 +1,7 @@
 package com.surya.jarvis
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -12,6 +13,7 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
@@ -28,6 +30,7 @@ import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.Locale
 
 class LiveVoiceManager(
     private val context: Context,
@@ -177,7 +180,10 @@ class LiveVoiceManager(
                                             "You are JARVIS, an intelligent personal AI assistant. " +
                                             "Speak naturally, clearly and conversationally. " +
                                             "Be concise unless more detail is needed. " +
-                                            "You are speaking directly with the user in a live voice conversation."
+                                            "You are speaking directly with the user in a live voice conversation. " +
+                                            "You may open an installed app or a listed Android Settings page only when the user directly asks. " +
+                                            "Use the provided functions for those actions, and never claim an action succeeded unless its function response says it did. " +
+                                            "Do not attempt any other phone control."
                                         )
                                     )
                                 )
@@ -185,6 +191,7 @@ class LiveVoiceManager(
                         )
 
                         put("sessionResumption", JSONObject())
+                        put("tools", phoneControlTools())
                     }
                 )
             }
@@ -223,6 +230,12 @@ class LiveVoiceManager(
                     status("JARVIS LIVE — LISTENING")
                     startPlayback()
                     startAudioCapture()
+                    return
+                }
+
+                val toolCall = json.optJSONObject("toolCall")
+                if (toolCall != null) {
+                    handlePhoneToolCall(webSocket, toolCall)
                     return
                 }
 
@@ -286,6 +299,163 @@ class LiveVoiceManager(
             }
         }
     }
+
+    private fun phoneControlTools(): JSONArray {
+        val launchApp = JSONObject().apply {
+            put("name", "launch_app")
+            put(
+                "description",
+                "Open an installed Android app by its visible app name. Only launch the app; do not perform actions inside it."
+            )
+            put(
+                "parameters",
+                JSONObject().apply {
+                    put("type", "OBJECT")
+                    put(
+                        "properties",
+                        JSONObject().put(
+                            "app_name",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "The installed app's visible name, such as Chrome or Maps.")
+                        )
+                    )
+                    put("required", JSONArray().put("app_name"))
+                }
+            )
+        }
+
+        val openSettings = JSONObject().apply {
+            put("name", "open_settings_page")
+            put(
+                "description",
+                "Open one of the supported Android Settings screens. This only opens the screen; it does not change settings."
+            )
+            put(
+                "parameters",
+                JSONObject().apply {
+                    put("type", "OBJECT")
+                    put(
+                        "properties",
+                        JSONObject().put(
+                            "page",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("enum", JSONArray().put("general").put("wifi").put("bluetooth").put("display").put("sound").put("apps").put("location"))
+                                .put("description", "Choose one supported page: general, wifi, bluetooth, display, sound, apps, or location.")
+                        )
+                    )
+                    put("required", JSONArray().put("page"))
+                }
+            )
+        }
+
+        return JSONArray().put(
+            JSONObject().put(
+                "functionDeclarations",
+                JSONArray().put(launchApp).put(openSettings)
+            )
+        )
+    }
+
+    private fun handlePhoneToolCall(webSocket: WebSocket, toolCall: JSONObject) {
+        val calls = toolCall.optJSONArray("functionCalls") ?: return
+        if (calls.length() == 0) return
+
+        mainHandler.post {
+            val functionResponses = JSONArray()
+
+            for (index in 0 until calls.length()) {
+                val call = calls.optJSONObject(index) ?: continue
+                val name = call.optString("name")
+                val id = call.optString("id")
+                val args = call.optJSONObject("args") ?: JSONObject()
+                val outcome = executePhoneTool(name, args)
+
+                val functionResponse = JSONObject().apply {
+                    if (id.isNotBlank()) put("id", id)
+                    put("name", name)
+                    put(
+                        "response",
+                        JSONObject()
+                            .put("success", outcome.first)
+                            .put("message", outcome.second)
+                    )
+                }
+                functionResponses.put(functionResponse)
+            }
+
+            if (functionResponses.length() > 0) {
+                val responseMessage = JSONObject().put(
+                    "toolResponse",
+                    JSONObject().put("functionResponses", functionResponses)
+                )
+                if (!webSocket.send(responseMessage.toString())) {
+                    status("PHONE ACTION RESPONSE COULD NOT BE SENT")
+                }
+            }
+        }
+    }
+
+    private fun executePhoneTool(name: String, args: JSONObject): Pair<Boolean, String> {
+        return try {
+            when (name) {
+                "launch_app" -> launchInstalledApp(args.optString("app_name"))
+                "open_settings_page" -> openSettingsPage(args.optString("page"))
+                else -> false to "This phone action is not supported."
+            }
+        } catch (_: Exception) {
+            false to "Android could not open that app or Settings page."
+        }
+    }
+
+    private fun launchInstalledApp(requestedName: String): Pair<Boolean, String> {
+        val target = normalizeAppName(requestedName)
+        if (target.isBlank()) return false to "Please specify an app name."
+
+        val packageManager = context.packageManager
+        val launcherQuery = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val match = packageManager.queryIntentActivities(launcherQuery, 0)
+            .firstOrNull { resolveInfo ->
+                val visibleName = resolveInfo.loadLabel(packageManager).toString()
+                normalizeAppName(visibleName) == target ||
+                    normalizeAppName(resolveInfo.activityInfo.packageName) == target
+            }
+            ?: return false to "I couldn't find an installed app named $requestedName."
+
+        val packageName = match.activityInfo.packageName
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: return false to "That app does not provide a launch screen."
+
+        context.startActivity(launchIntent)
+        status("OPENING ${match.loadLabel(packageManager).toString().uppercase(Locale.ROOT)}")
+        return true to "Opened ${match.loadLabel(packageManager)}."
+    }
+
+    private fun openSettingsPage(page: String): Pair<Boolean, String> {
+        val action = when (page.lowercase(Locale.ROOT)) {
+            "general" -> Settings.ACTION_SETTINGS
+            "wifi" -> Settings.ACTION_WIFI_SETTINGS
+            "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+            "display" -> Settings.ACTION_DISPLAY_SETTINGS
+            "sound" -> Settings.ACTION_SOUND_SETTINGS
+            "apps" -> Settings.ACTION_APPLICATION_SETTINGS
+            "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            else -> return false to "That Settings page is not supported."
+        }
+
+        val intent = Intent(action)
+        if (intent.resolveActivity(context.packageManager) == null) {
+            return false to "That Settings page is not available on this device."
+        }
+
+        context.startActivity(intent)
+        status("OPENING SETTINGS")
+        return true to "Opened the $page Settings page."
+    }
+
+    private fun normalizeAppName(name: String): String =
+        name.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
 
     private fun startAudioCapture() {
         if (!running.get() || !setupComplete) return
