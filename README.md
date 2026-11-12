@@ -2,6 +2,8 @@
 
 Kotlin Android client for a voice assistant using a Cloudflare Worker backend and Gemini APIs. The Gemini API key is held by the Worker and is not included in this repository.
 
+See [`PROJECT_HANDOVER.md`](PROJECT_HANDOVER.md) for the architecture, work completed, testing status, limitations, and roadmap.
+
 ## Project contents
 
 - `app/` — Android application source and resources.
