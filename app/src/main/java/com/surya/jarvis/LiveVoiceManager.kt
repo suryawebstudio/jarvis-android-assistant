@@ -24,14 +24,21 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class LiveVoiceManager(
     private val context: Context,
     private val onUserSpeech: (String) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
+
+    private data class PlaybackChunk(
+        val generation: Int,
+        val bytes: ByteArray
+    )
 
     companion object {
         private const val WORKER_URL =
@@ -53,6 +60,8 @@ class LiveVoiceManager(
         .build()
 
     private val running = AtomicBoolean(false)
+    private val playbackGeneration = AtomicInteger(0)
+    private val playbackQueue = LinkedBlockingDeque<PlaybackChunk>(16)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -60,13 +69,14 @@ class LiveVoiceManager(
 
     private var webSocket: WebSocket? = null
     private var audioRecord: AudioRecord? = null
+    @Volatile
     private var audioTrack: AudioTrack? = null
     private var recorderThread: Thread? = null
+    @Volatile
+    private var playbackThread: Thread? = null
 
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
-
-    private val playbackLock = Any()
 
     fun startListening() {
         if (!running.compareAndSet(false, true)) return
@@ -211,6 +221,7 @@ class LiveVoiceManager(
                 if (json.has("setupComplete")) {
                     setupComplete = true
                     status("JARVIS LIVE — LISTENING")
+                    startPlayback()
                     startAudioCapture()
                     return
                 }
@@ -219,14 +230,7 @@ class LiveVoiceManager(
                     json.optJSONObject("serverContent") ?: return
 
                 if (serverContent.optBoolean("interrupted")) {
-                    synchronized(playbackLock) {
-                        try {
-                            audioTrack?.pause()
-                            audioTrack?.flush()
-                            audioTrack?.play()
-                        } catch (_: Exception) {
-                        }
-                    }
+                    interruptPlayback()
                 }
 
                 val modelTurn =
@@ -402,62 +406,116 @@ class LiveVoiceManager(
         }
     }
 
-    private fun playAudio(bytes: ByteArray) {
-        try {
-            synchronized(playbackLock) {
-                if (audioTrack == null) {
-                    val minBuffer = AudioTrack.getMinBufferSize(
-                        OUTPUT_RATE,
-                        AudioFormat.CHANNEL_OUT_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT
-                    )
+    private fun startPlayback() {
+        if (playbackThread?.isAlive == true) return
 
-                    if (minBuffer <= 0) {
-                        throw IOException("Invalid speaker buffer size")
-                    }
+        playbackThread = Thread({
+            var track: AudioTrack? = null
+            try {
+                val minBuffer = AudioTrack.getMinBufferSize(
+                    OUTPUT_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
 
-                    val track = AudioTrack.Builder()
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(
-                                    AudioAttributes.USAGE_MEDIA
-                                )
-                                .setContentType(
-                                    AudioAttributes.CONTENT_TYPE_SPEECH
-                                )
-                                .build()
-                        )
-                        .setAudioFormat(
-                            AudioFormat.Builder()
-                                .setEncoding(
-                                    AudioFormat.ENCODING_PCM_16BIT
-                                )
-                                .setSampleRate(OUTPUT_RATE)
-                                .setChannelMask(
-                                    AudioFormat.CHANNEL_OUT_MONO
-                                )
-                                .build()
-                        )
-                        .setBufferSizeInBytes(
-                            maxOf(minBuffer, 9600)
-                        )
-                        .setTransferMode(AudioTrack.MODE_STREAM)
-                        .build()
-
-                    audioTrack = track
-                    track.play()
+                if (minBuffer <= 0) {
+                    throw IOException("Invalid speaker buffer size")
                 }
 
-                audioTrack?.write(
-                    bytes,
-                    0,
-                    bytes.size,
-                    AudioTrack.WRITE_BLOCKING
-                )
-            }
+                track = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(OUTPUT_RATE)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(maxOf(minBuffer, 9600))
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
 
-        } catch (e: Exception) {
-            status("SPEAKER ERROR: ${e.message}")
+                if (track.state != AudioTrack.STATE_INITIALIZED) {
+                    throw IOException("Speaker initialization failed")
+                }
+
+                audioTrack = track
+                track.play()
+
+                while (running.get() && setupComplete) {
+                    val chunk = playbackQueue.take()
+                    if (chunk.generation != playbackGeneration.get()) continue
+
+                    var offset = 0
+                    while (
+                        offset < chunk.bytes.size &&
+                        running.get() &&
+                        setupComplete &&
+                        chunk.generation == playbackGeneration.get()
+                    ) {
+                        val writeSize = minOf(1024, chunk.bytes.size - offset)
+                        val written = track.write(
+                            chunk.bytes,
+                            offset,
+                            writeSize,
+                            AudioTrack.WRITE_NON_BLOCKING
+                        )
+
+                        if (written > 0) {
+                            offset += written
+                        } else if (written == 0) {
+                            Thread.sleep(4)
+                        } else {
+                            throw IOException("Speaker playback failed")
+                        }
+                    }
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (_: Exception) {
+                if (running.get() && setupComplete) {
+                    status("SPEAKER PLAYBACK ERROR")
+                }
+            } finally {
+                if (audioTrack === track) audioTrack = null
+                try {
+                    track?.release()
+                } catch (_: Exception) {
+                }
+            }
+        }, "Jarvis-Audio-Playback").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun playAudio(bytes: ByteArray) {
+        if (bytes.isEmpty() || !setupComplete) return
+
+        val chunk = PlaybackChunk(playbackGeneration.get(), bytes)
+        if (!playbackQueue.offerLast(chunk)) {
+            // Keep latency bounded if output arrives faster than the speaker drains it.
+            playbackQueue.pollFirst()
+            playbackQueue.offerLast(chunk)
+        }
+    }
+
+    private fun interruptPlayback() {
+        playbackGeneration.incrementAndGet()
+        playbackQueue.clear()
+
+        try {
+            audioTrack?.let { track ->
+                track.pause()
+                track.flush()
+                if (running.get() && setupComplete) track.play()
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -496,16 +554,18 @@ class LiveVoiceManager(
         audioRecord = null
         recorderThread = null
 
-        synchronized(playbackLock) {
-            try {
-                audioTrack?.pause()
-                audioTrack?.flush()
-                audioTrack?.release()
-            } catch (_: Exception) {
-            }
+        playbackGeneration.incrementAndGet()
+        playbackQueue.clear()
+        playbackThread?.interrupt()
+        playbackThread = null
 
-            audioTrack = null
+        try {
+            audioTrack?.pause()
+            audioTrack?.flush()
+            audioTrack?.release()
+        } catch (_: Exception) {
         }
+        audioTrack = null
 
         try {
             echoCanceler?.release()
