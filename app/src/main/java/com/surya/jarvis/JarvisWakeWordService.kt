@@ -9,30 +9,29 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Handler
 import android.os.IBinder
+import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
-import java.util.Locale
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.SpeechService
+import org.vosk.android.StorageService
 
 /**
- * User-enabled wake-word listener. It keeps a visible microphone foreground
- * notification and stops itself as soon as it hears "Jarvis".
- *
- * On-device recognition is preferred when the device exposes it. The Android
- * speech provider may still use its own network service on devices without an
- * on-device recognizer; this is shown in the notification wording.
+ * Fully local wake-word listener. Vosk reads microphone PCM and recognizes only
+ * the small grammar containing "jarvis" and unknown speech. No Android
+ * SpeechRecognizer, network speech provider, or Gemini connection is used here.
  */
-class JarvisWakeWordService : Service(), RecognitionListener {
+class JarvisWakeWordService : Service() {
     companion object {
         private const val CHANNEL_ID = "jarvis_wake_word_channel"
         private const val NOTIFICATION_ID = 703
         private const val ACTION_START = "com.surya.jarvis.action.START_WAKE_WORD"
-        private const val WAKE_WORD = "jarvis"
+        private const val ASSET_MODEL = "vosk-model-small-en-us-0.15"
+        private const val MODEL_DIR = "jarvis-vosk-model"
+        private const val SAMPLE_RATE = 16000f
 
         fun start(context: Context) {
             val intent = Intent(context, JarvisWakeWordService::class.java).setAction(ACTION_START)
@@ -45,9 +44,11 @@ class JarvisWakeWordService : Service(), RecognitionListener {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var recognizer: SpeechRecognizer? = null
-    private var listening = false
+    private var model: Model? = null
+    private var recognizer: Recognizer? = null
+    private var speechService: SpeechService? = null
     private var shuttingDown = false
+    private var loading = false
 
     override fun onCreate() {
         super.onCreate()
@@ -60,105 +61,120 @@ class JarvisWakeWordService : Service(), RecognitionListener {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            startForeground(NOTIFICATION_ID, buildNotification())
-            handler.post { beginListening() }
+            startForeground(NOTIFICATION_ID, buildNotification("Loading offline wake model"))
+            handler.post { loadModelAndListen() }
         }
         return START_NOT_STICKY
     }
 
-    private fun beginListening() {
-        if (shuttingDown || listening) return
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            stopSelf()
-            return
-        }
-        recognizer?.destroy()
-        recognizer = if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
-        ) {
-            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-        } else {
-            SpeechRecognizer.createSpeechRecognizer(this)
-        }
-        recognizer?.setRecognitionListener(this)
-        val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        }
-        listening = true
-        recognizer?.startListening(request)
+    private fun loadModelAndListen() {
+        if (shuttingDown || loading || speechService != null) return
+        loading = true
+        StorageService.unpack(
+            this,
+            ASSET_MODEL,
+            MODEL_DIR,
+            { unpackedModel ->
+                if (shuttingDown) {
+                    unpackedModel.close()
+                    return@unpack
+                }
+                try {
+                    model = unpackedModel
+                    // A constrained grammar keeps this always-on recognizer small
+                    // and prevents ordinary speech from becoming an action.
+                    val localRecognizer = Recognizer(
+                        unpackedModel,
+                        SAMPLE_RATE,
+                        "[\"jarvis\", \"[unk]\"]"
+                    )
+                    recognizer = localRecognizer
+                    speechService = SpeechService(localRecognizer, SAMPLE_RATE)
+                    updateNotification("Offline wake word active — say Jarvis")
+                    speechService?.startListening(voskListener)
+                } catch (_: Exception) {
+                    stopSelf()
+                } finally {
+                    loading = false
+                }
+            },
+            { _ ->
+                loading = false
+                stopSelf()
+            }
+        )
     }
 
-    private fun checkWakeWord(texts: List<String>) {
-        if (texts.any { containsWakeWord(it) }) triggerWake()
+    private val voskListener = object : org.vosk.android.RecognitionListener {
+        override fun onPartialResult(hypothesis: String?) {
+            if (containsWakeWord(hypothesis)) triggerWake()
+        }
+
+        override fun onResult(hypothesis: String?) {
+            if (containsWakeWord(hypothesis)) triggerWake()
+        }
+
+        override fun onFinalResult(hypothesis: String?) {
+            if (containsWakeWord(hypothesis)) triggerWake()
+        }
+
+        override fun onError(exception: Exception?) {
+            if (!shuttingDown) handler.postDelayed({ restartRecognition() }, 500L)
+        }
+
+        override fun onTimeout() {
+            if (!shuttingDown) handler.post { restartRecognition() }
+        }
     }
 
-    private fun containsWakeWord(value: String): Boolean =
-        value.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9 ]"), " ")
-            .split(Regex("\\s+"))
-            .contains(WAKE_WORD)
+    private fun containsWakeWord(hypothesis: String?): Boolean {
+        val text = hypothesis.orEmpty()
+        val candidates = listOf(
+            runCatching { JSONObject(text).optString("partial") }.getOrDefault(""),
+            runCatching { JSONObject(text).optString("text") }.getOrDefault("")
+        )
+        return candidates.any { candidate ->
+            candidate.lowercase().split(Regex("[^a-z0-9]+"))
+                .any { it == "jarvis" || it == "jarvis." }
+        }
+    }
+
+    private fun restartRecognition() {
+        if (shuttingDown || speechService == null) return
+        runCatching {
+            speechService?.cancel()
+            speechService?.startListening(voskListener)
+        }.onFailure { stopSelf() }
+    }
 
     private fun triggerWake() {
         if (shuttingDown) return
         shuttingDown = true
-        listening = false
-        recognizer?.cancel()
-        recognizer?.destroy()
-        recognizer = null
+        runCatching { speechService?.cancel() }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         handler.postDelayed({ JarvisVoiceForegroundService.start(this) }, 250L)
     }
 
-    override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
-    override fun onBeginningOfSpeech() = Unit
-    override fun onRmsChanged(rmsdB: Float) = Unit
-    override fun onBufferReceived(buffer: ByteArray?) = Unit
-    override fun onEndOfSpeech() {
-        listening = false
-        scheduleRestart()
-    }
-    override fun onError(error: Int) {
-        listening = false
-        if (!shuttingDown) scheduleRestart()
-    }
-    override fun onResults(results: android.os.Bundle?) {
-        listening = false
-        val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-        checkWakeWord(texts)
-        if (!shuttingDown) scheduleRestart()
-    }
-    override fun onPartialResults(partialResults: android.os.Bundle?) {
-        val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-        checkWakeWord(texts)
-    }
-    override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
-
-    private fun scheduleRestart() {
-        handler.removeCallbacksAndMessages(null)
-        handler.postDelayed({ beginListening() }, 350L)
-    }
-
     override fun onDestroy() {
         shuttingDown = true
         handler.removeCallbacksAndMessages(null)
-        recognizer?.cancel()
-        recognizer?.destroy()
+        runCatching { speechService?.shutdown() }
+        runCatching { recognizer?.close() }
+        runCatching { model?.close() }
+        speechService = null
         recognizer = null
+        model = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
+    private fun buildNotification(status: String): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-        .setContentTitle("JARVIS wake word enabled")
-        .setContentText("Say “Jarvis” to start voice mode")
+        .setContentTitle("JARVIS offline wake word enabled")
+        .setContentText(status)
         .setOngoing(true)
         .setCategory(Notification.CATEGORY_SERVICE)
         .setContentIntent(
@@ -171,18 +187,20 @@ class JarvisWakeWordService : Service(), RecognitionListener {
         )
         .build()
 
+    private fun updateNotification(status: String) {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
+    }
+
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "JARVIS wake word",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Shows while JARVIS listens for its user-enabled wake word."
-                    setSound(null, null)
-                }
-            )
-        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "JARVIS offline wake word",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows while JARVIS locally listens for its wake word."
+                setSound(null, null)
+            }
+        )
     }
 }
