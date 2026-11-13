@@ -164,6 +164,15 @@ class MainActivity : AppCompatActivity() {
         fun toggleFullStorage() = runOnUiThread { toggleFullStorageAccess() }
 
         @JavascriptInterface
+        fun getShareableFiles(): String = JarvisFileManager(this@MainActivity).shareableFilesJson()
+
+        @JavascriptInterface
+        fun shareFile(name: String) = runOnUiThread {
+            val result = JarvisFileManager(this@MainActivity).shareFile(name)
+            if (!result.first) runJs("showToast(${JSONObject.quote(result.second)})")
+        }
+
+        @JavascriptInterface
         fun openAccessibility() = runOnUiThread {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }

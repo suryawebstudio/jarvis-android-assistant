@@ -6,9 +6,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.io.IOException
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
 class JarvisFileManager(private val context: Context) {
@@ -102,6 +105,54 @@ class JarvisFileManager(private val context: Context) {
         }
         val suffix = if (entries.size > 100) " | More files are present." else ""
         return true to "Files in the selected folder: $description$suffix"
+    }
+
+    fun shareableFilesJson(): String {
+        val files = JSONArray()
+        if (isFullAccessEnabled()) {
+            sharedStorageRoot()?.listFiles()
+                ?.filter { it.isFile }
+                ?.sortedBy { it.name.lowercase(Locale.ROOT) }
+                ?.take(100)
+                ?.forEach { files.put(JSONObject().put("name", it.name)) }
+            return files.toString()
+        }
+
+        getDocumentRoot()?.listFiles()
+            ?.filter { it.isFile }
+            ?.sortedBy { it.name.orEmpty().lowercase(Locale.ROOT) }
+            ?.take(100)
+            ?.forEach { file -> files.put(JSONObject().put("name", file.name.orEmpty())) }
+        return files.toString()
+    }
+
+    fun shareFile(name: String): Pair<Boolean, String> {
+        val safeName = validateName(name) ?: return false to "That file name is not allowed."
+        return try {
+            val uri = if (isFullAccessEnabled()) {
+                val file = File(sharedStorageRoot() ?: return false to "Shared storage is not available.", safeName)
+                if (!file.isFile) return false to "I could not find $safeName in shared storage."
+                val shareDir = File(context.cacheDir, "shared-files").apply { mkdirs() }
+                val cached = File(shareDir, safeName)
+                file.inputStream().use { input -> cached.outputStream().use { output -> input.copyTo(output) } }
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", cached)
+            } else {
+                val document = getDocumentRoot()?.findFile(safeName)
+                    ?: return false to "I could not find $safeName in the selected folder."
+                if (!document.isFile) return false to "$safeName is not a regular file."
+                document.uri
+            }
+
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = mimeType(safeName)
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Send $safeName").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true to "Choose an app to send $safeName."
+        } catch (_: Exception) {
+            false to "Android could not prepare $safeName for sharing."
+        }
     }
 
     fun createTextFile(name: String, content: String): Pair<Boolean, String> {
@@ -204,6 +255,14 @@ class JarvisFileManager(private val context: Context) {
     private fun isTextDocument(file: DocumentFile): Boolean =
         file.type?.startsWith("text/") == true ||
             file.name?.substringAfterLast('.', "")?.lowercase(Locale.ROOT) in textExtensions
+
+    private fun mimeType(name: String): String = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "txt", "md", "log", "kt", "java", "html", "css", "js" -> "text/plain"
+        "json" -> "application/json"
+        "csv" -> "text/csv"
+        "xml" -> "application/xml"
+        else -> "application/octet-stream"
+    }
 
     private fun validateName(name: String): String? {
         val trimmed = name.trim()
