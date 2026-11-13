@@ -803,12 +803,25 @@ class LiveVoiceManager(
                     ?: return@setOnImageAvailableListener
                 val jpeg = ByteArray(buffer.remaining()).also(buffer::get)
                 val message = JSONObject().apply {
-                    put("realtimeInput", JSONObject().apply {
-                        put("mediaChunks", JSONArray().put(
-                            JSONObject()
-                                .put("mimeType", "image/jpeg")
-                                .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+                    put("clientContent", JSONObject().apply {
+                        put("turns", JSONArray().put(
+                            JSONObject().apply {
+                                put("role", "user")
+                                put("parts", JSONArray()
+                                    .put(JSONObject().put(
+                                        "text",
+                                        "Look at this camera image and answer the user's camera question. Describe only what is visibly present, and say clearly if something cannot be determined from the image."
+                                    ))
+                                    .put(JSONObject().put(
+                                        "inlineData",
+                                        JSONObject()
+                                            .put("mimeType", "image/jpeg")
+                                            .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+                                    ))
+                                )
+                            }
                         ))
+                        put("turnComplete", true)
                     })
                 }
                 finish(socket.send(message.toString()))
