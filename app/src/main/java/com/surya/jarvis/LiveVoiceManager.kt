@@ -209,7 +209,7 @@ class LiveVoiceManager(
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
-                                            "For file work, use choose_storage_folder before accessing files if no approved folder exists, then use list_files, create_text_file, or edit_text_file. File names must be simple names in the approved folder; do not invent paths or claim access to all phone storage. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
+                                            "For file work, JARVIS uses Android's full shared-storage access only. If it is not enabled, tell the user to enable Full storage access from the JARVIS Settings panel and Android's permission screen; do not ask the user to select a folder. Use simple file names and do not invent paths. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
                                             "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal JARVIS Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
                                             "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens. " +
@@ -455,21 +455,15 @@ class LiveVoiceManager(
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
-        val chooseStorageFolder = JSONObject().apply {
-            put("name", "choose_storage_folder")
-            put("description", "Open Android's folder picker so the user can choose the folder where JARVIS may manage files. The user must choose the folder manually.")
-            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
-        }
-
         val listFiles = JSONObject().apply {
             put("name", "list_files")
-            put("description", "List files and folders in the user-approved JARVIS storage folder.")
+            put("description", "List files and folders in shared storage. Full storage access must be enabled by the user.")
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
         val createTextFile = JSONObject().apply {
             put("name", "create_text_file")
-            put("description", "Create a new UTF-8 text file in the user-approved JARVIS storage folder.")
+            put("description", "Create a new UTF-8 text file in shared storage. Full storage access must be enabled by the user.")
             put("parameters", JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject()
@@ -481,7 +475,7 @@ class LiveVoiceManager(
 
         val editTextFile = JSONObject().apply {
             put("name", "edit_text_file")
-            put("description", "Replace the complete UTF-8 text content of an existing file in the user-approved JARVIS storage folder.")
+            put("description", "Replace the complete UTF-8 text content of an existing shared-storage file. Full storage access must be enabled by the user.")
             put("parameters", JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject()
@@ -493,7 +487,7 @@ class LiveVoiceManager(
 
         val deleteFile = JSONObject().apply {
             put("name", "delete_file")
-            put("description", "Permanently delete one file or folder from the user-approved JARVIS storage folder. Always ask the user to confirm aloud before calling this with confirmed=true.")
+            put("description", "Permanently delete one file or folder from shared storage. Full storage access must be enabled by the user. Always ask the user to confirm aloud before calling this with confirmed=true.")
             put("parameters", JSONObject().apply {
                 put("type", "OBJECT")
                 put("properties", JSONObject()
@@ -506,7 +500,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -613,7 +607,7 @@ class LiveVoiceManager(
 
     private fun isTaskAction(name: String): Boolean =
         name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" ||
-            name == "choose_storage_folder" || name == "list_files" || name == "create_text_file" ||
+            name == "list_files" || name == "create_text_file" ||
             name == "edit_text_file" || name == "delete_file"
 
     private fun isPotentiallySensitive(name: String, args: JSONObject): Boolean {
@@ -643,7 +637,6 @@ class LiveVoiceManager(
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
                 "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
                 "capture_camera_image" -> captureCameraImage()
-                "choose_storage_folder" -> fileManager.openFolderPicker()
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
                     args.optString("name"),

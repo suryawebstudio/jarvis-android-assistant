@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -46,17 +45,6 @@ class MainActivity : AppCompatActivity() {
         else runJs("showToast('NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE')")
     }
 
-    private val storageFolderLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        val message = if (uri == null) {
-            "STORAGE FOLDER NOT SELECTED"
-        } else {
-            JarvisFileManager(this).saveFolder(uri).second
-        }
-        runJs("showToast(${JSONObject.quote(message)})")
-    }
-
     private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -90,9 +78,6 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         configureWebView()
-        if (intent?.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) {
-            storageFolderLauncher.launch(null)
-        }
     }
 
     private fun configureWebView() {
@@ -352,7 +337,6 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) storageFolderLauncher.launch(null)
     }
 
     override fun onStop() {
