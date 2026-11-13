@@ -65,6 +65,9 @@ class LiveVoiceManager(
         .build()
 
     private val running = AtomicBoolean(false)
+    // The service can call stop(), onTaskRemoved(), and release() close together.
+    // Only the first shutdown is allowed to release the audio/WebSocket resources.
+    private val stopped = AtomicBoolean(true)
     private val playbackGeneration = AtomicInteger(0)
     private val playbackQueue = LinkedBlockingDeque<PlaybackChunk>(16)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -104,6 +107,7 @@ class LiveVoiceManager(
 
     fun startListening() {
         if (!running.compareAndSet(false, true)) return
+        stopped.set(false)
 
         if (
             ContextCompat.checkSelfPermission(
@@ -958,6 +962,7 @@ class LiveVoiceManager(
     }
 
     fun stop() {
+        if (!stopped.compareAndSet(false, true)) return
         running.set(false)
         setupComplete = false
         clearTaskState()

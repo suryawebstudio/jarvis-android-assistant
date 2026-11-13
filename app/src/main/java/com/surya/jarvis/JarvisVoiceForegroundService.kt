@@ -60,7 +60,10 @@ class JarvisVoiceForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                voiceManager?.stop()
+                // Mark the service stopped before callbacks are delivered. This prevents
+                // the manager's final status callback from trying to update a removed
+                // foreground notification during service destruction.
+                isRunning = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -79,15 +82,15 @@ class JarvisVoiceForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
         voiceManager?.release()
         voiceManager = null
-        isRunning = false
         sendStatus("VOICE MODE OFF")
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        voiceManager?.stop()
+        isRunning = false
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }

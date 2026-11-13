@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
 
     private var voiceMode = false
+    private var receiverRegistered = false
 
     private val workerUrl =
         "https://jarvis-ai-backend.suryawebstudio.workers.dev"
@@ -350,6 +351,7 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(voiceReceiver, filter)
         }
+        receiverRegistered = true
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -361,7 +363,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        unregisterReceiver(voiceReceiver)
+        if (receiverRegistered) {
+            unregisterReceiver(voiceReceiver)
+            receiverRegistered = false
+        }
         super.onStop()
     }
 
