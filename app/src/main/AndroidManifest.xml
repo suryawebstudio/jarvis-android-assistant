@@ -9,6 +9,8 @@
 
     <!-- Microphone access for voice commands -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Used only for the Android flashlight API; camera preview is never opened. -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

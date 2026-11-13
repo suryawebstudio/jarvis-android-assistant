@@ -3,6 +3,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -209,7 +211,8 @@ class LiveVoiceManager(
                                             "Speak naturally, clearly and conversationally. " +
                                             "Be concise unless more detail is needed. " +
                                             "You are speaking directly with the user in a live voice conversation. " +
-                                            "You may open an installed app or a listed Android Settings page only when the user directly asks. " +
+                                            "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. " +
+                                            "Android protects many system settings: use the relevant Settings page or quick settings panel for Wi-Fi, Bluetooth, mobile data, location, and similar controls, and never claim that a protected setting changed unless the tool response confirms it. " +
                                             "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
@@ -384,8 +387,8 @@ class LiveVoiceManager(
                             "page",
                             JSONObject()
                                 .put("type", "STRING")
-                                .put("enum", JSONArray().put("general").put("wifi").put("bluetooth").put("display").put("sound").put("apps").put("location"))
-                                .put("description", "Choose one supported page: general, wifi, bluetooth, display, sound, apps, or location.")
+                                .put("enum", JSONArray().put("general").put("quick_settings").put("wireless").put("wifi").put("bluetooth").put("nfc").put("display").put("sound").put("notifications").put("apps").put("battery").put("battery_saver").put("location").put("security").put("privacy").put("accessibility").put("date_time").put("keyboard").put("storage").put("vpn").put("cast").put("home"))
+                                .put("description", "Open a system page. Supported values include general, quick_settings, wireless, wifi, bluetooth, nfc, display, sound, notifications, apps, battery, battery_saver, location, security, privacy, accessibility, date_time, keyboard, storage, vpn, cast, or home. Android may require the user to make protected changes manually.")
                         )
                     )
                     put("required", JSONArray().put("page"))
@@ -400,6 +403,16 @@ class LiveVoiceManager(
                 "Read accessible labels and text currently visible on the foreground screen. Use this before interacting when the target is unclear."
             )
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
+        val setFlashlight = JSONObject().apply {
+            put("name", "set_flashlight")
+            put("description", "Turn the phone flashlight on or off. This uses Android's flashlight API and requires the user to grant camera permission; no camera preview is opened.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().put("enabled", JSONObject().put("type", "BOOLEAN").put("description", "True to turn the flashlight on, false to turn it off.")))
+                put("required", JSONArray().put("enabled"))
+            })
         }
 
         val controlScreen = JSONObject().apply {
@@ -489,7 +502,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -600,7 +613,7 @@ class LiveVoiceManager(
     }
 
     private fun isTaskAction(name: String): Boolean =
-        name == "launch_app" || name == "open_settings_page" || name == "control_visible_screen" ||
+        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "control_visible_screen" ||
             name == "choose_storage_folder" || name == "list_files" || name == "create_text_file" ||
             name == "edit_text_file" || name == "delete_file"
 
@@ -643,6 +656,7 @@ class LiveVoiceManager(
             when (name) {
                 "launch_app" -> launchInstalledApp(args.optString("app_name"))
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
+                "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
                 "choose_storage_folder" -> fileManager.openFolderPicker()
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
@@ -699,12 +713,27 @@ class LiveVoiceManager(
     private fun openSettingsPage(page: String): Pair<Boolean, String> {
         val action = when (page.lowercase(Locale.ROOT)) {
             "general" -> Settings.ACTION_SETTINGS
+            "quick_settings" -> Settings.ACTION_QUICK_SETTINGS
+            "wireless" -> Settings.ACTION_WIRELESS_SETTINGS
             "wifi" -> Settings.ACTION_WIFI_SETTINGS
             "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+            "nfc" -> Settings.ACTION_NFC_SETTINGS
             "display" -> Settings.ACTION_DISPLAY_SETTINGS
             "sound" -> Settings.ACTION_SOUND_SETTINGS
+            "notifications" -> Settings.ACTION_NOTIFICATION_SETTINGS
             "apps" -> Settings.ACTION_APPLICATION_SETTINGS
+            "battery" -> Settings.ACTION_BATTERY_SETTINGS
+            "battery_saver" -> Settings.ACTION_BATTERY_SAVER_SETTINGS
             "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            "security" -> Settings.ACTION_SECURITY_SETTINGS
+            "privacy" -> Settings.ACTION_PRIVACY_SETTINGS
+            "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
+            "date_time" -> Settings.ACTION_DATE_SETTINGS
+            "keyboard" -> Settings.ACTION_INPUT_METHOD_SETTINGS
+            "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+            "vpn" -> Settings.ACTION_VPN_SETTINGS
+            "cast" -> Settings.ACTION_CAST_SETTINGS
+            "home" -> Settings.ACTION_HOME_SETTINGS
             else -> return false to "That Settings page is not supported."
         }
 
@@ -716,6 +745,27 @@ class LiveVoiceManager(
         context.startActivity(intent)
         status("OPENING SETTINGS")
         return true to "Opened the $page Settings page."
+    }
+
+    private fun setFlashlight(enabled: Boolean): Pair<Boolean, String> {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return false to "Camera permission is required for flashlight control. Enable it in JARVIS App info, then try again."
+        }
+
+        return try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return false to "This phone does not expose a controllable flashlight."
+            cameraManager.setTorchMode(cameraId, enabled)
+            status(if (enabled) "FLASHLIGHT ON" else "FLASHLIGHT OFF")
+            true to if (enabled) "Flashlight turned on." else "Flashlight turned off."
+        } catch (_: SecurityException) {
+            false to "Android denied flashlight access. Grant camera permission in JARVIS App info."
+        } catch (_: Exception) {
+            false to "The flashlight could not be changed while another camera app is using it."
+        }
     }
 
     private fun normalizeAppName(name: String): String =
