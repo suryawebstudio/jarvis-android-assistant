@@ -54,7 +54,7 @@ canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 <div class="setting">Voice responses <input id="voiceResponses" type="checkbox" checked onchange="setVoiceResponses(this.checked)"></div><div class="setting">Sound effects <input id="soundEffects" type="checkbox" checked onchange="setSoundEffects(this.checked)"></div>
 <div class="setting">Particle effects <input id="particleEffects" type="checkbox" checked onchange="setParticleEffects(this.checked)"></div><div class="setting">Auto listening <input id="autoListening" type="checkbox" onchange="setAutoListening(this.checked)"></div>
 <div class="setting">AI provider <span>Gemini ▾</span></div><div class="setting">Voice <span>English ▾</span></div>
-<button class="settingAction" onclick="toggleFullStorage()">Full storage access</button><button class="settingAction" onclick="openAccessibility()">Accessibility controls</button></section>
+<button id="fullStorageAction" class="settingAction" onclick="toggleFullStorage()">Full storage access: OFF</button><button class="settingAction" onclick="openAccessibility()">Accessibility controls</button></section>
 <section class="panel" id="history"><div class="panelhead"><h2>HISTORY</h2><button class="close" onclick="closePanels()">×</button></div><div id="historyList" class="messages"><p style="color:#777;text-align:center;margin-top:40px">Your conversations will appear here.</p></div></section>
 <section class="panel" id="chat"><div class="panelhead"><h2>JARVIS CHAT</h2><button class="close" onclick="closePanels()">×</button></div><div class="messages" id="messages"><div class="msg bot">Hello. I am JARVIS. Touch my core or send me a message.</div></div><div class="composer"><input id="chatInput" placeholder="Message JARVIS..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">↑</button></div></section>
 </div>
@@ -107,13 +107,16 @@ function sendChat(){const i=document.getElementById('chatInput'),v=i.value.trim(
 function addUserMessage(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item)}
 function addChat(v){addUserMessage(v);if(window.AndroidJarvis?.sendMessage){setMode('thinking');AndroidJarvis.sendMessage(v)}else{const b=document.createElement('div');b.className='msg bot';b.textContent='Interface demo: connect your JARVIS AI backend to process this request.';document.getElementById('messages').appendChild(b)}}
 function addChatFromAndroid(v){addUserMessage(v);openPanel('chat')}
-function setParticleEffects(enabled){effectsEnabled=enabled;canvas.style.opacity=enabled?'1':'.18';if(window.AndroidJarvis?.setParticleEffects)AndroidJarvis.setParticleEffects(enabled)}
+function setParticleEffects(enabled){effectsEnabled=enabled;canvas.style.opacity=enabled?'1':'0';if(window.AndroidJarvis?.setParticleEffects)AndroidJarvis.setParticleEffects(enabled)}
 function setVoiceResponses(enabled){if(window.AndroidJarvis?.setVoiceResponses)AndroidJarvis.setVoiceResponses(enabled);showToast(enabled?'VOICE RESPONSES ON':'VOICE RESPONSES OFF')}
     function setSoundEffects(enabled){soundEnabled=enabled;if(window.AndroidJarvis?.setSoundEffects)AndroidJarvis.setSoundEffects(enabled);if(enabled)beep();showToast(enabled?'SOUND EFFECTS ON':'SOUND EFFECTS OFF')}
 function setAutoListening(enabled){if(window.AndroidJarvis?.setAutoListening)AndroidJarvis.setAutoListening(enabled);if(enabled&&!window.AndroidJarvis?.startVoice)showToast('AUTO LISTENING NEEDS ANDROID VOICE');else showToast(enabled?'AUTO LISTENING ON':'AUTO LISTENING OFF')}
 function toggleFullStorage(){if(window.AndroidJarvis?.toggleFullStorage)AndroidJarvis.toggleFullStorage();else showToast('ANDROID STORAGE CONTROL UNAVAILABLE')}
 function openAccessibility(){if(window.AndroidJarvis?.openAccessibility)AndroidJarvis.openAccessibility();else showToast('ANDROID ACCESSIBILITY CONTROL UNAVAILABLE')}
+function setFullStorageLabel(enabled){const b=document.getElementById('fullStorageAction');if(b)b.textContent=enabled?'Full storage access: ON':'Full storage access: OFF'}
+function applyNativeSettings(){if(!window.AndroidJarvis?.getUiState)return;try{const s=JSON.parse(AndroidJarvis.getUiState());document.getElementById('voiceResponses').checked=!!s.voiceResponses;document.getElementById('soundEffects').checked=!!s.soundEffects;document.getElementById('particleEffects').checked=!!s.particleEffects;document.getElementById('autoListening').checked=!!s.autoListening;soundEnabled=!!s.soundEffects;effectsEnabled=!!s.particleEffects;canvas.style.opacity=effectsEnabled?'1':'0';setFullStorageLabel(!!s.fullStorage)}catch(e){}}
 function jarvisSpeak(text){const m=document.getElementById('messages'),b=document.createElement('div');b.className='msg bot';b.textContent=text;m.appendChild(b);m.scrollTop=m.scrollHeight;setMode('speaking')}
+applyNativeSettings();
 </script>
 </body>
 </html>

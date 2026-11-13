@@ -138,6 +138,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun getUiState(): String {
+            val preferences = getSharedPreferences("jarvis_ui", MODE_PRIVATE)
+            return JSONObject()
+                .put("voiceResponses", preferences.getBoolean("voice_responses", true))
+                .put("soundEffects", preferences.getBoolean("sound_effects", true))
+                .put("particleEffects", preferences.getBoolean("particle_effects", true))
+                .put("autoListening", preferences.getBoolean("auto_listening", false))
+                .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
+                .toString()
+        }
+
+        @JavascriptInterface
         fun toggleFullStorage() = runOnUiThread { toggleFullStorageAccess() }
 
         @JavascriptInterface
@@ -211,12 +223,12 @@ class MainActivity : AppCompatActivity() {
         val fileManager = JarvisFileManager(this)
         if (fileManager.isFullAccessEnabled()) {
             fileManager.setFullAccessEnabled(false)
-            runJs("showToast('FULL STORAGE ACCESS OFF')")
+            runJs("setFullStorageLabel(false);showToast('FULL STORAGE ACCESS OFF')")
             return
         }
         if (fileManager.fullAccessGranted()) {
             fileManager.setFullAccessEnabled(true)
-            runJs("showToast('FULL STORAGE ACCESS ON')")
+            runJs("setFullStorageLabel(true);showToast('FULL STORAGE ACCESS ON')")
             return
         }
         AlertDialog.Builder(this)
@@ -236,6 +248,11 @@ class MainActivity : AppCompatActivity() {
     private fun runJs(script: String) {
         if (!::binding.isInitialized) return
         runOnUiThread { binding.jarvisWebView.evaluateJavascript("(function(){try{$script}catch(e){}})();", null) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        runJs("applyNativeSettings()")
     }
 
     override fun onStart() {
