@@ -174,7 +174,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopVoice() {
         voiceMode = false
-        JarvisVoiceForegroundService.stop(this)
+        // stopService() is asynchronous, so this must remain safe when the
+        // button is tapped repeatedly while the service is already stopping.
+        runCatching { JarvisVoiceForegroundService.stop(this) }
         runJs("setMode('idle');document.getElementById('micLabel').textContent='TAP TO SPEAK'")
     }
 

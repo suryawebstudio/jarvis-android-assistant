@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicBoolean
 
 class JarvisVoiceForegroundService : Service() {
 
@@ -41,9 +42,11 @@ class JarvisVoiceForegroundService : Service() {
     }
 
     private var voiceManager: LiveVoiceManager? = null
+    private val destroyed = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
+        destroyed.set(false)
         createNotificationChannel()
 
         voiceManager = LiveVoiceManager(
@@ -58,32 +61,44 @@ class JarvisVoiceForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> {
-                // Mark the service stopped before callbacks are delivered. This prevents
-                // the manager's final status callback from trying to update a removed
-                // foreground notification during service destruction.
-                isRunning = false
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+        try {
+            when (intent?.action) {
+                ACTION_STOP -> {
+                    // Mark the service stopped before callbacks are delivered. This prevents
+                    // the manager's final status callback from trying to update a removed
+                    // foreground notification during service destruction.
+                    isRunning = false
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
 
-            ACTION_START -> {
-                startForeground(NOTIFICATION_ID, buildNotification("Starting JARVIS voice listening"))
-                if (!isRunning) {
-                    isRunning = true
-                    sendStatus("CONNECTING TO JARVIS LIVE...")
-                    voiceManager?.startListening()
-                    updateNotification("JARVIS is listening")
+                ACTION_START -> {
+                    startForeground(NOTIFICATION_ID, buildNotification("Starting JARVIS voice listening"))
+                    if (!isRunning) {
+                        isRunning = true
+                        sendStatus("CONNECTING TO JARVIS LIVE...")
+                        voiceManager?.startListening()
+                        updateNotification("JARVIS is listening")
+                    }
                 }
             }
+        } catch (_: Exception) {
+            // A rapid start/stop transition can make an audio or notification
+            // operation invalid. Terminate cleanly instead of crashing the app.
+            isRunning = false
+            stopSelf()
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        if (!destroyed.compareAndSet(false, true)) return
         isRunning = false
-        voiceManager?.release()
+        try {
+            voiceManager?.release()
+        } catch (_: Exception) {
+            // Cleanup must never bring down the host process.
+        }
         voiceManager = null
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -91,7 +106,6 @@ class JarvisVoiceForegroundService : Service() {
         } catch (_: Exception) {
             // The service may already have been removed by the system.
         }
-        sendStatus("VOICE MODE OFF")
         super.onDestroy()
     }
 
@@ -104,6 +118,7 @@ class JarvisVoiceForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun sendStatus(status: String) {
+        if (destroyed.get()) return
         sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_STATUS, status))
         updateNotification(status)
     }
