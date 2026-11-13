@@ -86,8 +86,17 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     private fun tapVisibleTarget(target: String): Pair<Boolean, String> {
         if (target.isBlank()) return false to "Specify the visible button, link, or text to tap."
-        val node = findVisibleNode(target)
-            ?: return false to "I could not find a visible control named '$target'. Inspect the screen and try the exact visible label."
+        val matches = findVisibleNodes(target)
+        if (matches.isEmpty()) {
+            return false to "I could not find a visible control named '$target'. Inspect the screen and try the exact visible label."
+        }
+        val bestScore = matches.maxOf { it.first }
+        val bestMatches = matches.filter { it.first == bestScore }
+        if (bestMatches.size > 1) {
+            val choices = bestMatches.take(5).joinToString(", ") { describeNodeLabel(it.second) }
+            return false to "The target '$target' is ambiguous. Matching visible controls: $choices. Ask the user to choose one."
+        }
+        val node = bestMatches.first().second
 
         val clickable = if (node.isClickable) node else clickableAncestor(node)
         val success = clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
@@ -97,8 +106,19 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     private fun typeIntoVisibleTarget(target: String, text: String): Pair<Boolean, String> {
         if (text.isBlank()) return false to "Specify the text to enter."
-        val node = if (target.isBlank()) findFocusedEditable(rootInActiveWindow)
-        else findVisibleNode(target)
+        val node = if (target.isBlank()) {
+            findFocusedEditable(rootInActiveWindow)
+        } else {
+            val matches = findVisibleNodes(target)
+            if (matches.isEmpty()) return false to "I could not find a visible text field named '$target'."
+            val bestScore = matches.maxOf { it.first }
+            val bestMatches = matches.filter { it.first == bestScore }
+            if (bestMatches.size > 1) {
+                val choices = bestMatches.take(5).joinToString(", ") { describeNodeLabel(it.second) }
+                return false to "The text field '$target' is ambiguous. Matching visible controls: $choices. Ask the user to choose one."
+            }
+            bestMatches.first().second
+        }
         val editable = node?.let { if (it.isEditable) it else editableDescendant(it) }
             ?: return false to "I could not find a visible text field named '$target'."
 
@@ -130,35 +150,85 @@ class JarvisAccessibilityService : AccessibilityService() {
     private fun describeVisibleScreen(): String {
         val root = rootInActiveWindow
             ?: return "No accessible screen is currently visible."
-        val labels = ArrayList<String>()
-        collectLabels(root, labels)
-        return if (labels.isEmpty()) {
+        val elements = ArrayList<String>()
+        collectElements(root, elements, 0)
+        val packageName = root.packageName?.toString().orEmpty().ifBlank { "unknown" }
+        val className = root.className?.toString().orEmpty().ifBlank { "unknown" }
+        return if (elements.isEmpty()) {
             "The current screen has no readable accessibility labels."
         } else {
-            "Visible screen controls and text: " + labels.take(80).joinToString(" | ")
+            "SCREEN package=$packageName class=$className\n" +
+                elements.take(80).joinToString("\n")
         }
     }
 
-    private fun collectLabels(node: AccessibilityNodeInfo, labels: MutableList<String>) {
-        val label = node.text?.toString()?.trim().orEmpty().ifBlank {
-            node.contentDescription?.toString()?.trim().orEmpty()
+    private fun collectElements(
+        node: AccessibilityNodeInfo,
+        elements: MutableList<String>,
+        depth: Int
+    ) {
+        if (depth > 20 || elements.size >= 100) return
+        val text = node.text?.toString()?.trim().orEmpty()
+        val description = node.contentDescription?.toString()?.trim().orEmpty()
+        if (text.isNotBlank() || description.isNotBlank() || node.isClickable || node.isEditable || node.isScrollable) {
+            val role = node.className?.toString()?.substringAfterLast('.') ?: "node"
+            elements.add(
+                "ELEMENT ${elements.size + 1} role=$role " +
+                    "text=${quoteForOutput(text)} " +
+                    "description=${quoteForOutput(description)} " +
+                    "clickable=${node.isClickable} editable=${node.isEditable} " +
+                    "scrollable=${node.isScrollable} enabled=${node.isEnabled}"
+            )
         }
-        if (label.isNotBlank() && !labels.contains(label)) labels.add(label)
         for (index in 0 until node.childCount) {
-            node.getChild(index)?.let { collectLabels(it, labels) }
+            node.getChild(index)?.let { collectElements(it, elements, depth + 1) }
         }
     }
 
-    private fun findVisibleNode(target: String): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
+    private fun findVisibleNode(target: String): AccessibilityNodeInfo? =
+        findVisibleNodes(target).maxByOrNull { it.first }?.second
+
+    private fun findVisibleNodes(target: String): List<Pair<Int, AccessibilityNodeInfo>> {
+        val root = rootInActiveWindow ?: return emptyList()
         val normalizedTarget = normalize(target)
-        return findNode(root) { node ->
-            val text = node.text?.toString().orEmpty()
-            val description = node.contentDescription?.toString().orEmpty()
-            normalize(text) == normalizedTarget || normalize(description) == normalizedTarget ||
-                normalize(text).contains(normalizedTarget) || normalize(description).contains(normalizedTarget)
+        if (normalizedTarget.isBlank()) return emptyList()
+        val matches = ArrayList<Pair<Int, AccessibilityNodeInfo>>()
+        collectMatchingNodes(root, normalizedTarget, matches, 0)
+        return matches.sortedByDescending { it.first }
+    }
+
+    private fun collectMatchingNodes(
+        node: AccessibilityNodeInfo,
+        normalizedTarget: String,
+        matches: MutableList<Pair<Int, AccessibilityNodeInfo>>,
+        depth: Int
+    ) {
+        if (depth > 20 || matches.size >= 30) return
+        val text = normalize(node.text?.toString().orEmpty())
+        val description = normalize(node.contentDescription?.toString().orEmpty())
+        val score = when {
+            text == normalizedTarget || description == normalizedTarget -> 400
+            text.startsWith(normalizedTarget) || description.startsWith(normalizedTarget) -> 300
+            text.contains(normalizedTarget) || description.contains(normalizedTarget) -> 200
+            else -> 0
+        }
+        if (score > 0 && (node.isVisibleToUser || node.isClickable || node.isEditable)) {
+            matches.add(score to node)
+        }
+        for (index in 0 until node.childCount) {
+            node.getChild(index)?.let {
+                collectMatchingNodes(it, normalizedTarget, matches, depth + 1)
+            }
         }
     }
+
+    private fun describeNodeLabel(node: AccessibilityNodeInfo): String =
+        node.text?.toString()?.trim().orEmpty().ifBlank {
+            node.contentDescription?.toString()?.trim().orEmpty().ifBlank { "unlabeled control" }
+        }
+
+    private fun quoteForOutput(value: String): String =
+        "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\""
 
     private fun findFocusedEditable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? =
         node?.let {
