@@ -1,6 +1,7 @@
 package com.surya.jarvis
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -42,7 +43,13 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) beginVoiceConversation()
-        else runJs("showToast('NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE')")
+        else runJs("NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE")
+    }
+
+    private val defaultAssistantLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        runJs("updateDefaultAssistantLabel();showToast(${JSONObject.quote(if (isDefaultAssistant()) "JARVIS IS DEFAULT ASSISTANT" else "DEFAULT ASSISTANT NOT CHANGED")})")
     }
 
     private val voiceReceiver = object : BroadcastReceiver() {
@@ -133,6 +140,7 @@ class MainActivity : AppCompatActivity() {
                 .put("autoListening", preferences.getBoolean("auto_listening", false))
                 .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
                 .put("memoryCount", memoryStore.all().size)
+                .put("defaultAssistant", isDefaultAssistant())
                 .toString()
         }
 
@@ -161,6 +169,9 @@ class MainActivity : AppCompatActivity() {
         fun openAccessibility() = runOnUiThread {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+
+        @JavascriptInterface
+        fun requestDefaultAssistant() = runOnUiThread { requestDefaultAssistantRole() }
     }
 
     private fun requestVoiceStart() {
@@ -193,6 +204,28 @@ class MainActivity : AppCompatActivity() {
         } else {
             beginVoiceConversation()
         }
+    }
+
+    private fun isDefaultAssistant(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+
+    private fun requestDefaultAssistantRole() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            runCatching { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+                .onFailure { runJs("showToast('OPEN DEFAULT ASSISTANT SETTINGS MANUALLY')") }
+            return
+        }
+        val roleManager = getSystemService(RoleManager::class.java)
+        if (roleManager == null || !roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+            runJs("showToast('THIS PHONE DOES NOT EXPOSE THE ASSISTANT ROLE')")
+            return
+        }
+        if (roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+            runJs("showToast('JARVIS IS ALREADY THE DEFAULT ASSISTANT')")
+            return
+        }
+        defaultAssistantLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
     }
 
     private fun sendMessageToBackend(message: String) {
