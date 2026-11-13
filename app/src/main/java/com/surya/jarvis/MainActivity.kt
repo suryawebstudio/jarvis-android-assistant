@@ -110,11 +110,11 @@ class MainActivity : AppCompatActivity() {
     private inner class JarvisBridge {
         @JavascriptInterface
         fun startVoice() = runOnUiThread {
-            if (voiceMode) stopVoice() else requestVoiceStart()
+            if (voiceMode) this@MainActivity.stopVoice() else requestVoiceStart()
         }
 
         @JavascriptInterface
-        fun stopVoice() = runOnUiThread { stopVoice() }
+        fun stopVoice() = runOnUiThread { this@MainActivity.stopVoice() }
 
         @JavascriptInterface
         fun sendMessage(message: String) {
