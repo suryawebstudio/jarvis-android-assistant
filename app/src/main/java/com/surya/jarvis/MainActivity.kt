@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
             beginVoiceConversation()
         }
 
-    private val voiceReceiver = object : BroadcastReceiver {
+    private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             when (intent?.action) {
                 JarvisVoiceForegroundService.ACTION_STATUS -> {
