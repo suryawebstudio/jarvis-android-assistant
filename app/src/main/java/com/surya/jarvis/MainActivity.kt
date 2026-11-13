@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
@@ -46,7 +47,7 @@ class MainActivity : AppCompatActivity() {
             beginVoiceConversation()
         }
 
-    private val voiceReceiver = object : BroadcastReceiver() {
+    private val voiceReceiver = object : BroadcastReceiver {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             when (intent?.action) {
                 JarvisVoiceForegroundService.ACTION_STATUS -> {
@@ -68,6 +69,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val storageFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        binding.statusText.text = if (uri == null) {
+            "STORAGE FOLDER NOT SELECTED"
+        } else {
+            JarvisFileManager(this).saveFolder(uri).second
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -75,6 +86,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setSupportActionBar(binding.toolbar)
+
+        if (intent?.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) {
+            storageFolderLauncher.launch(null)
+        }
 
         if (JarvisVoiceForegroundService.isRunning) {
             voiceMode = true
@@ -282,6 +297,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(voiceReceiver, filter)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent?.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) {
+            storageFolderLauncher.launch(null)
         }
     }
 

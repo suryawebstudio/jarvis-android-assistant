@@ -26,6 +26,10 @@ The Live session also coordinates these calls as a bounded multi-step task. It s
 
 Voice mode now runs in `JarvisVoiceForegroundService`. After microphone permission and the Android notification permission are granted, pressing the voice button starts a persistent microphone foreground service with an ongoing notification and a STOP action. JARVIS continues listening while another app is in front. Stop it from the JARVIS button or the notification; Android may still stop background work under extreme system conditions, and Android requires the visible notification for microphone privacy.
 
+## Voice file management
+
+JARVIS can manage files only inside a folder that the user explicitly selects through Android's Storage Access Framework. Use voice commands such as “choose a storage folder”, “list my files”, “create a text file named notes.txt”, or “edit notes.txt”. It does not claim unrestricted access to the entire phone. Deletion is permanently confirmation-gated: JARVIS speaks the exact file or folder name and deletes it only after the user explicitly says yes and the tool call includes `confirmed=true`.
+
 ## Open in AndroidIDE
 
 Use AndroidIDE's **Clone Git repo** option with:

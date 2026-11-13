@@ -84,6 +84,10 @@ When a sensitive action is blocked, `LiveVoiceManager` also speaks a local Andro
 
 Voice mode is owned by `JarvisVoiceForegroundService`, not `MainActivity`, so it can continue while another app is in the foreground. The service starts only from the visible JARVIS activity after microphone permission is granted, declares the Android microphone foreground-service type, shows an ongoing low-priority notification, and provides a notification STOP action. MainActivity receives private in-app broadcasts for status and recognized speech while it is visible, but leaving the activity does not release the voice manager. The user can stop listening from the JARVIS button or the notification. Android may still reclaim services under severe system pressure, and the persistent notification is intentionally required for microphone privacy.
 
+### Voice file management
+
+`JarvisFileManager.kt` uses Android's Storage Access Framework and a persisted user-selected document-tree URI. The Live tools `choose_storage_folder`, `list_files`, `create_text_file`, `edit_text_file`, and `delete_file` operate only in that approved folder and restrict names to one simple file/folder name rather than arbitrary paths. The folder picker is opened through MainActivity so Android returns the URI correctly. `delete_file` is always blocked until the exact target is spoken through local Text-to-Speech and the user explicitly confirms; only then may the model retry with `confirmed=true`. No `MANAGE_EXTERNAL_STORAGE` or broad hidden-storage access is requested.
+
 ### GitHub repository
 
 The repository was created, initially private, then changed to public at the user's request. It is now:
@@ -108,6 +112,7 @@ The Android source and README are in `main`. IDE metadata, build outputs, releas
 - Supports optional visible-screen control through the user-enabled Accessibility Service.
 - Coordinates continuous multi-step workflows with a 24-step safety limit and cancellation tool.
 - Keeps voice capture alive across other apps through a microphone foreground service and persistent stop notification.
+- Creates and edits UTF-8 text files and lists/deletes entries inside a user-approved Storage Access Framework folder.
 - Preserves a separate normal text-chat path through the Worker.
 
 ### Not complete or not yet verified
@@ -116,6 +121,7 @@ The Android source and README are in `main`. IDE metadata, build outputs, releas
 - **Accessibility end-to-end test:** Enable JARVIS under Android Accessibility settings, then test screen inspection, tapping, typing, scrolling, and confirmation-gated actions in several apps.
 - **Multi-step task test:** Try “open WhatsApp, find John, type a message, and send it”; verify JARVIS inspects between steps, stops before Send, resumes only after confirmation, and cancels on “stop”.
 - **Background listening test:** Start voice mode, accept notification permission, open another app, speak a command, verify JARVIS responds, then stop from the notification and verify microphone capture ends.
+- **File-management test:** Say “choose a storage folder”, select a folder, create and edit a text file, list it, then request deletion and verify JARVIS speaks the exact name and waits for “yes” before deleting.
 - **Barge-in latency test:** Confirm interruption stops speech promptly on the device. Current local code reacts to the server's interruption event; local voice activity detection could stop playback even earlier.
 - **Build verification in a full Android environment:** The cloud sandbox did not have a usable Java compiler/Android SDK, so an Android APK build could not be completed there. Use Code on the Go on the phone to build.
 - **Visible live transcript/history:** `MainActivity` has a callback prepared for recognized speech, but `LiveVoiceManager` does not yet deliver transcription events to it. Voice turns therefore are not fully shown as chat history.

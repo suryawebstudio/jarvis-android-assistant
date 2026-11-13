@@ -77,6 +77,8 @@ class LiveVoiceManager(
     @Volatile
     private var speechReady = false
 
+    private val fileManager = JarvisFileManager(context.applicationContext)
+
     init {
         textToSpeech = TextToSpeech(context.applicationContext) { result ->
             speechReady = result == TextToSpeech.SUCCESS
@@ -205,6 +207,7 @@ class LiveVoiceManager(
                                             "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
+                                            "For file work, use choose_storage_folder before accessing files if no approved folder exists, then use list_files, create_text_file, or edit_text_file. File names must be simple names in the approved folder; do not invent paths or claim access to all phone storage. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
                                             "When a tool response says confirmation is required, the Android app has already spoken the confirmation prompt; do not repeat a long confirmation speech, and wait for the user's answer. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
                                             "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens."
@@ -419,10 +422,58 @@ class LiveVoiceManager(
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
+        val chooseStorageFolder = JSONObject().apply {
+            put("name", "choose_storage_folder")
+            put("description", "Open Android's folder picker so the user can choose the folder where JARVIS may manage files. The user must choose the folder manually.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
+        val listFiles = JSONObject().apply {
+            put("name", "list_files")
+            put("description", "List files and folders in the user-approved JARVIS storage folder.")
+            put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
+        }
+
+        val createTextFile = JSONObject().apply {
+            put("name", "create_text_file")
+            put("description", "Create a new UTF-8 text file in the user-approved JARVIS storage folder.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject()
+                    .put("name", JSONObject().put("type", "STRING").put("description", "File name only, without folders."))
+                    .put("content", JSONObject().put("type", "STRING").put("description", "Complete text content.")))
+                put("required", JSONArray().put("name").put("content"))
+            })
+        }
+
+        val editTextFile = JSONObject().apply {
+            put("name", "edit_text_file")
+            put("description", "Replace the complete UTF-8 text content of an existing file in the user-approved JARVIS storage folder.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject()
+                    .put("name", JSONObject().put("type", "STRING").put("description", "Existing file name only, without folders."))
+                    .put("content", JSONObject().put("type", "STRING").put("description", "New complete text content.")))
+                put("required", JSONArray().put("name").put("content"))
+            })
+        }
+
+        val deleteFile = JSONObject().apply {
+            put("name", "delete_file")
+            put("description", "Permanently delete one file or folder from the user-approved JARVIS storage folder. Always ask the user to confirm aloud before calling this with confirmed=true.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject()
+                    .put("name", JSONObject().put("type", "STRING").put("description", "Exact file or folder name only, without folders."))
+                    .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "True only after the user explicitly confirms the exact deletion.")))
+                put("required", JSONArray().put("name").put("confirmed"))
+            })
+        }
+
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask)
+                JSONArray().put(launchApp).put(openSettings).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -504,15 +555,23 @@ class LiveVoiceManager(
             return false to "Confirmation was not requested for a pending sensitive action. Ask the user before retrying."
         }
 
+        if (isPotentiallySensitive(name, args) && !confirmed) {
+            taskStepCount += 1
+            awaitingTaskConfirmation = true
+            status("CONFIRMATION REQUIRED")
+            if (name == "delete_file") {
+                speakConfirmationRequest("This will permanently delete ${args.optString("name")}. Say yes to confirm, or say stop to cancel.")
+            } else {
+                speakConfirmationRequest()
+            }
+            return false to "Confirmation required before this action. Ask the user to confirm, then repeat the same tool call with confirmed=true."
+        }
+
         taskStepCount += 1
         status("TASK STEP $taskStepCount/$MAX_TASK_STEPS")
         val outcome = executePhoneTool(name, args)
 
-        if (isPotentiallySensitive(name, args) && !confirmed && !outcome.first) {
-            awaitingTaskConfirmation = true
-            status("CONFIRMATION REQUIRED")
-            speakConfirmationRequest()
-        } else if (outcome.first && confirmed) {
+        if (outcome.first && confirmed) {
             awaitingTaskConfirmation = false
         }
 
@@ -523,9 +582,12 @@ class LiveVoiceManager(
     }
 
     private fun isTaskAction(name: String): Boolean =
-        name == "launch_app" || name == "open_settings_page" || name == "control_visible_screen"
+        name == "launch_app" || name == "open_settings_page" || name == "control_visible_screen" ||
+            name == "choose_storage_folder" || name == "list_files" || name == "create_text_file" ||
+            name == "edit_text_file" || name == "delete_file"
 
     private fun isPotentiallySensitive(name: String, args: JSONObject): Boolean {
+        if (name == "delete_file") return true
         if (name != "control_visible_screen") return false
         val value = listOf(
             args.optString("action"),
@@ -544,8 +606,9 @@ class LiveVoiceManager(
         awaitingTaskConfirmation = false
     }
 
-    private fun speakConfirmationRequest() {
-        val prompt = "This action may send, delete, purchase, call, or share something. Please say yes to confirm, or say stop to cancel."
+    private fun speakConfirmationRequest(
+        prompt: String = "This action may send, delete, purchase, call, or share something. Please say yes to confirm, or say stop to cancel."
+    ) {
         mainHandler.post {
             if (!speechReady) return@post
             textToSpeech?.speak(
@@ -562,6 +625,17 @@ class LiveVoiceManager(
             when (name) {
                 "launch_app" -> launchInstalledApp(args.optString("app_name"))
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
+                "choose_storage_folder" -> fileManager.openFolderPicker()
+                "list_files" -> fileManager.listFiles()
+                "create_text_file" -> fileManager.createTextFile(
+                    args.optString("name"),
+                    args.optString("content")
+                )
+                "edit_text_file" -> fileManager.editTextFile(
+                    args.optString("name"),
+                    args.optString("content")
+                )
+                "delete_file" -> fileManager.deleteFile(args.optString("name"))
                 "inspect_visible_screen" -> if (JarvisAccessibilityService.isEnabled()) {
                     true to JarvisAccessibilityService.inspectScreen()
                 } else {
