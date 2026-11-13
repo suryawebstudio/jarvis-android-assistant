@@ -34,9 +34,9 @@ class JarvisVoiceForegroundService : Service() {
         }
 
         fun stop(context: android.content.Context) {
-            val intent = Intent(context, JarvisVoiceForegroundService::class.java)
-                .setAction(ACTION_STOP)
-            context.startService(intent)
+            // Stop the running service directly. Sending a second startService
+            // command can leave the foreground notification alive on some devices.
+            context.stopService(Intent(context, JarvisVoiceForegroundService::class.java))
         }
     }
 
@@ -85,6 +85,12 @@ class JarvisVoiceForegroundService : Service() {
         isRunning = false
         voiceManager?.release()
         voiceManager = null
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        } catch (_: Exception) {
+            // The service may already have been removed by the system.
+        }
         sendStatus("VOICE MODE OFF")
         super.onDestroy()
     }
