@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Optional assistant capabilities; each is requested separately from the UI. -->
@@ -84,6 +85,22 @@
             android:name=".JarvisVoiceForegroundService"
             android:exported="false"
             android:stopWithTask="true"
+            android:foregroundServiceType="microphone" />
+
+        <service
+            android:name=".JarvisGestureWakeService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="user-enabled shake gesture wake detection" />
+        </service>
+
+        <service
+            android:name=".JarvisWakeWordService"
+            android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="microphone" />
 
         <service

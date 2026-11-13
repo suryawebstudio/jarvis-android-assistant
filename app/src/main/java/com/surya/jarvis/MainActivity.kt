@@ -142,6 +142,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun setGestureWake(enabled: Boolean) = runOnUiThread { setGestureWakeEnabled(enabled) }
+
+        @JavascriptInterface
+        fun setWakeWord(enabled: Boolean) = runOnUiThread { setWakeWordEnabled(enabled) }
+
+        @JavascriptInterface
         fun getUiState(): String {
             val preferences = getSharedPreferences("jarvis_ui", MODE_PRIVATE)
             return JSONObject()
@@ -149,6 +155,8 @@ class MainActivity : AppCompatActivity() {
                 .put("soundEffects", preferences.getBoolean("sound_effects", true))
                 .put("particleEffects", preferences.getBoolean("particle_effects", true))
                 .put("autoListening", preferences.getBoolean("auto_listening", false))
+                .put("gestureWake", preferences.getBoolean("gesture_wake", false))
+                .put("wakeWord", preferences.getBoolean("wake_word", false))
                 .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
                 .put("memoryCount", memoryStore.all().size)
                 .put("defaultAssistant", isDefaultAssistant())
@@ -204,6 +212,41 @@ class MainActivity : AppCompatActivity() {
         voiceMode = true
         runJs("setMode('thinking');document.getElementById('micLabel').textContent='STOP LISTENING'")
         JarvisVoiceForegroundService.start(this)
+    }
+
+    private fun setGestureWakeEnabled(enabled: Boolean) {
+        saveUiPreference("gesture_wake", enabled)
+        if (enabled) {
+            runCatching { JarvisGestureWakeService.start(this) }
+                .onFailure {
+                    saveUiPreference("gesture_wake", false)
+                    runJs("document.getElementById('gestureWake').checked=false;showToast('SHAKE WAKE COULD NOT START')")
+                }
+            runJs("showToast('SHAKE WAKE ENABLED — KEEP JARVIS READY')")
+        } else {
+            JarvisGestureWakeService.stop(this)
+            runJs("showToast('SHAKE WAKE DISABLED')")
+        }
+    }
+
+    private fun setWakeWordEnabled(enabled: Boolean) {
+        if (enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            saveUiPreference("wake_word", false)
+            runJs("document.getElementById('wakeWord').checked=false;showToast('ENABLE MICROPHONE PERMISSION FIRST')")
+            return
+        }
+        saveUiPreference("wake_word", enabled)
+        if (enabled) {
+            runCatching { JarvisWakeWordService.start(this) }
+                .onFailure {
+                    saveUiPreference("wake_word", false)
+                    runJs("document.getElementById('wakeWord').checked=false;showToast('WAKE WORD COULD NOT START')")
+                }
+            runJs("showToast('WAKE WORD ENABLED — SAY JARVIS')")
+        } else {
+            JarvisWakeWordService.stop(this)
+            runJs("showToast('WAKE WORD DISABLED')")
+        }
     }
 
     private fun stopVoice() {
