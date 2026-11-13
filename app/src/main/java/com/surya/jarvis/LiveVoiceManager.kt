@@ -878,7 +878,7 @@ class LiveVoiceManager(
                                     }
                                 }
 
-                                override fun onConfigureFailed(_: CameraCaptureSession) {
+                                override fun onConfigureFailed(failedSession: CameraCaptureSession) {
                                     finish(false)
                                 }
                             },
