@@ -69,7 +69,9 @@ class LiveVoiceManager(
     // Only the first shutdown is allowed to release the audio/WebSocket resources.
     private val stopped = AtomicBoolean(true)
     private val playbackGeneration = AtomicInteger(0)
-    private val playbackQueue = LinkedBlockingDeque<PlaybackChunk>(16)
+    // Keep enough decoded audio buffered for low-memory phones whose audio
+    // thread can be briefly delayed by Android or another foreground app.
+    private val playbackQueue = LinkedBlockingDeque<PlaybackChunk>(64)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var taskActive = false
@@ -209,7 +211,7 @@ class LiveVoiceManager(
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. " +
                                             "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools. " +
-                                            "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
+                                            "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
                                             "For file work, use choose_storage_folder before accessing files if no approved folder exists, then use list_files, create_text_file, or edit_text_file. File names must be simple names in the approved folder; do not invent paths or claim access to all phone storage. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
@@ -499,25 +501,27 @@ class LiveVoiceManager(
         mainHandler.post {
             val functionResponses = JSONArray()
 
-            for (index in 0 until calls.length()) {
-                val call = calls.optJSONObject(index) ?: continue
-                val name = call.optString("name")
-                val id = call.optString("id")
-                val args = call.optJSONObject("args") ?: JSONObject()
-                val outcome = executeTaskTool(name, args)
+            // Gemini can return several calls in one turn. Executing them all
+            // immediately makes a tap/scroll happen before the new screen is
+            // available, which looks like skipped task steps. Return one result
+            // and let the model choose the next action from the updated screen.
+            val call = calls.optJSONObject(0) ?: return@post
+            val name = call.optString("name")
+            val id = call.optString("id")
+            val args = call.optJSONObject("args") ?: JSONObject()
+            val outcome = executeTaskTool(name, args)
 
-                val functionResponse = JSONObject().apply {
-                    if (id.isNotBlank()) put("id", id)
-                    put("name", name)
-                    put(
-                        "response",
-                        JSONObject()
-                            .put("success", outcome.first)
-                            .put("message", outcome.second)
-                    )
-                }
-                functionResponses.put(functionResponse)
+            val functionResponse = JSONObject().apply {
+                if (id.isNotBlank()) put("id", id)
+                put("name", name)
+                put(
+                    "response",
+                    JSONObject()
+                        .put("success", outcome.first)
+                        .put("message", outcome.second)
+                )
             }
+            functionResponses.put(functionResponse)
 
             if (functionResponses.length() > 0) {
                 val responseMessage = JSONObject().put(
@@ -888,18 +892,16 @@ class LiveVoiceManager(
                         setupComplete &&
                         chunk.generation == playbackGeneration.get()
                     ) {
-                        val writeSize = minOf(1024, chunk.bytes.size - offset)
+                        val writeSize = minOf(2048, chunk.bytes.size - offset)
                         val written = track.write(
                             chunk.bytes,
                             offset,
                             writeSize,
-                            AudioTrack.WRITE_NON_BLOCKING
+                            AudioTrack.WRITE_BLOCKING
                         )
 
                         if (written > 0) {
                             offset += written
-                        } else if (written == 0) {
-                            Thread.sleep(4)
                         } else {
                             throw IOException("Speaker playback failed")
                         }
@@ -928,11 +930,10 @@ class LiveVoiceManager(
         if (bytes.isEmpty() || !setupComplete || !voiceResponsesEnabled()) return
 
         val chunk = PlaybackChunk(playbackGeneration.get(), bytes)
-        if (!playbackQueue.offerLast(chunk)) {
-            // Keep latency bounded if output arrives faster than the speaker drains it.
-            playbackQueue.pollFirst()
-            playbackQueue.offerLast(chunk)
-        }
+        // Do not discard an older buffered speech chunk: dropping one creates
+        // an audible word or syllable gap. If the queue is briefly saturated,
+        // discard only the newest fragment rather than blocking WebSocket input.
+        playbackQueue.offerLast(chunk)
     }
 
     private fun interruptPlayback() {
