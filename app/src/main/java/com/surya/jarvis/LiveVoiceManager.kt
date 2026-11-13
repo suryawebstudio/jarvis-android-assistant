@@ -21,7 +21,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.provider.Settings
-import android.speech.tts.TextToSpeech
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import okhttp3.OkHttpClient
@@ -86,21 +85,8 @@ class LiveVoiceManager(
     private var taskStepCount = 0
     private var awaitingTaskConfirmation = false
 
-    private var textToSpeech: TextToSpeech? = null
-    @Volatile
-    private var speechReady = false
-
     private val fileManager = JarvisFileManager(context.applicationContext)
     private val memoryStore = JarvisMemoryStore(context.applicationContext)
-
-    init {
-        textToSpeech = TextToSpeech(context.applicationContext) { result ->
-            speechReady = result == TextToSpeech.SUCCESS
-            if (speechReady) {
-                textToSpeech?.language = Locale.getDefault()
-            }
-        }
-    }
 
     @Volatile
     private var setupComplete = false
@@ -224,7 +210,7 @@ class LiveVoiceManager(
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
                                             "For file work, use choose_storage_folder before accessing files if no approved folder exists, then use list_files, create_text_file, or edit_text_file. File names must be simple names in the approved folder; do not invent paths or claim access to all phone storage. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
-                                            "When a tool response says confirmation is required, the Android app has already spoken the confirmation prompt; do not repeat a long confirmation speech, and wait for the user's answer. " +
+                                            "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal JARVIS Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
                                             "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens. " +
                                             persistentMemoryInstruction()
@@ -608,11 +594,6 @@ class LiveVoiceManager(
             taskStepCount += 1
             awaitingTaskConfirmation = true
             status("CONFIRMATION REQUIRED")
-            if (name == "delete_file") {
-                speakConfirmationRequest("This will permanently delete ${args.optString("name")}. Say yes to confirm, or say stop to cancel.")
-            } else {
-                speakConfirmationRequest()
-            }
             return false to "Confirmation required before this action. Ask the user to confirm, then repeat the same tool call with confirmed=true."
         }
 
@@ -653,20 +634,6 @@ class LiveVoiceManager(
         taskActive = false
         taskStepCount = 0
         awaitingTaskConfirmation = false
-    }
-
-    private fun speakConfirmationRequest(
-        prompt: String = "This action may send, delete, purchase, call, or share something. Please say yes to confirm, or say stop to cancel."
-    ) {
-        mainHandler.post {
-            if (!speechReady) return@post
-            textToSpeech?.speak(
-                prompt,
-                TextToSpeech.QUEUE_FLUSH,
-                null,
-                "jarvis-confirmation"
-            )
-        }
     }
 
     private fun executePhoneTool(name: String, args: JSONObject): Pair<Boolean, String> {
@@ -1227,13 +1194,6 @@ class LiveVoiceManager(
 
     fun release() {
         stop()
-        try {
-            textToSpeech?.stop()
-            textToSpeech?.shutdown()
-        } catch (_: Exception) {
-        }
-        textToSpeech = null
-        speechReady = false
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }
