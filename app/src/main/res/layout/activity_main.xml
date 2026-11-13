@@ -167,6 +167,16 @@
                 app:cornerRadius="14dp"
                 android:layout_marginTop="16dp"/>
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/fullStorageButton"
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:text="FULL STORAGE ACCESS: OFF"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#6A3D24"
+                app:cornerRadius="14dp"
+                android:layout_marginTop="12dp"/>
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.Settings
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.surya.jarvis.databinding.ActivityMainBinding
@@ -43,8 +44,12 @@ class MainActivity : AppCompatActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) {
-            beginVoiceConversation()
+        ) { granted ->
+            if (granted) {
+                beginVoiceConversation()
+            } else {
+                binding.statusText.text = "NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE"
+            }
         }
 
     private val voiceReceiver = object : BroadcastReceiver() {
@@ -147,6 +152,53 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             binding.responseText.text =
                 "Enable JARVIS under Downloaded apps in Android Accessibility settings, then return here."
+        }
+        binding.fullStorageButton.setOnClickListener {
+            toggleFullStorageAccess()
+        }
+        updateFullStorageButton()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) updateFullStorageButton()
+    }
+
+    private fun toggleFullStorageAccess() {
+        val fileManager = JarvisFileManager(this)
+        if (fileManager.isFullAccessEnabled()) {
+            fileManager.setFullAccessEnabled(false)
+            updateFullStorageButton()
+            binding.statusText.text = "SELECTED-FOLDER STORAGE MODE"
+            binding.responseText.text = "Full storage access is off. Choose a folder before managing files."
+            return
+        }
+        if (fileManager.fullAccessGranted()) {
+            fileManager.setFullAccessEnabled(true)
+            updateFullStorageButton()
+            binding.statusText.text = "FULL STORAGE ACCESS ENABLED"
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Enable full storage access?")
+            .setMessage(
+                "This lets JARVIS list, create, edit, and delete files and folders in shared storage. " +
+                    "Android will ask you to approve this in Settings. You can turn it off here at any time."
+            )
+            .setNegativeButton("CANCEL", null)
+            .setPositiveButton("OPEN SETTINGS") { _, _ ->
+                val result = fileManager.openFullAccessSettings()
+                binding.statusText.text = result.second
+            }
+            .show()
+    }
+
+    private fun updateFullStorageButton() {
+        val fileManager = JarvisFileManager(this)
+        binding.fullStorageButton.text = if (fileManager.isFullAccessEnabled()) {
+            "FULL STORAGE ACCESS: ON"
+        } else {
+            "FULL STORAGE ACCESS: OFF"
         }
     }
 

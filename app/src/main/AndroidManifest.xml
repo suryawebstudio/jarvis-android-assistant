@@ -4,6 +4,9 @@
     <!-- Internet access for Gemini AI -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Optional, user-enabled access to shared storage. The app never grants this silently. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- Microphone access for voice commands -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

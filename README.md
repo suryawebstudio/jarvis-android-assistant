@@ -30,6 +30,8 @@ Voice mode now runs in `JarvisVoiceForegroundService`. After microphone permissi
 
 JARVIS can manage files only inside a folder that the user explicitly selects through Android's Storage Access Framework. Use voice commands such as “choose a storage folder”, “list my files”, “create a text file named notes.txt”, or “edit notes.txt”. It does not claim unrestricted access to the entire phone. Deletion is permanently confirmation-gated: JARVIS speaks the exact file or folder name and deletes it only after the user explicitly says yes and the tool call includes `confirmed=true`.
 
+The app also supports an opt-in **Full Storage Access** toggle in the main settings area. The toggle first shows a warning and then opens Android's `MANAGE_EXTERNAL_STORAGE` screen; JARVIS uses full shared-storage mode only after both Android permission and the in-app toggle are enabled. Turning the toggle off returns to selected-folder mode. Full mode currently manages top-level entries under shared storage and restricts voice-created or edited content to small text files; deletion remains confirmation-gated.
+
 ## Open in AndroidIDE
 
 Use AndroidIDE's **Clone Git repo** option with:
