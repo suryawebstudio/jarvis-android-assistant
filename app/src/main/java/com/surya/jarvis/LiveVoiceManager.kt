@@ -732,16 +732,16 @@ class LiveVoiceManager(
     private fun openSettingsPage(page: String): Pair<Boolean, String> {
         val action = when (page.lowercase(Locale.ROOT)) {
             "general" -> Settings.ACTION_SETTINGS
-            "quick_settings" -> Settings.ACTION_QUICK_SETTINGS
+            "quick_settings" -> "android.settings.QUICK_SETTINGS"
             "wireless" -> Settings.ACTION_WIRELESS_SETTINGS
             "wifi" -> Settings.ACTION_WIFI_SETTINGS
             "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
             "nfc" -> Settings.ACTION_NFC_SETTINGS
             "display" -> Settings.ACTION_DISPLAY_SETTINGS
             "sound" -> Settings.ACTION_SOUND_SETTINGS
-            "notifications" -> Settings.ACTION_NOTIFICATION_SETTINGS
+            "notifications" -> "android.settings.NOTIFICATION_SETTINGS"
             "apps" -> Settings.ACTION_APPLICATION_SETTINGS
-            "battery" -> Settings.ACTION_BATTERY_SETTINGS
+            "battery" -> "android.settings.BATTERY_SETTINGS"
             "battery_saver" -> Settings.ACTION_BATTERY_SAVER_SETTINGS
             "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
             "security" -> Settings.ACTION_SECURITY_SETTINGS
