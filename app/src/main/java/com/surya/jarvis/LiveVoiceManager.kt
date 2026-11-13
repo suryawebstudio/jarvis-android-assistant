@@ -3,8 +3,12 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.media.ImageReader
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -14,6 +18,7 @@ import android.media.AudioManager
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
@@ -29,6 +34,7 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -211,7 +217,7 @@ class LiveVoiceManager(
                                             "Speak naturally, clearly and conversationally. " +
                                             "Be concise unless more detail is needed. " +
                                             "You are speaking directly with the user in a live voice conversation. " +
-                                            "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. " +
+                                            "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
                                             "Android protects many system settings: use the relevant Settings page or quick settings panel for Wi-Fi, Bluetooth, mobile data, location, and similar controls, and never claim that a protected setting changed unless the tool response confirms it. " +
                                             "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: perform one action at a time, inspect the screen after opening or changing screens, then continue with the next step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
@@ -415,6 +421,18 @@ class LiveVoiceManager(
             })
         }
 
+        val captureCameraImage = JSONObject().apply {
+            put("name", "capture_camera_image")
+            put(
+                "description",
+                "Capture one still image from the rear camera and send it to the active JARVIS vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
+            )
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        }
+
         val controlScreen = JSONObject().apply {
             put("name", "control_visible_screen")
             put(
@@ -502,7 +520,7 @@ class LiveVoiceManager(
         return JSONArray().put(
             JSONObject().put(
                 "functionDeclarations",
-                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
+                JSONArray().put(launchApp).put(openSettings).put(setFlashlight).put(captureCameraImage).put(inspectScreen).put(controlScreen).put(startTask).put(cancelTask).put(chooseStorageFolder).put(listFiles).put(createTextFile).put(editTextFile).put(deleteFile)
             )
         )
     }
@@ -613,7 +631,7 @@ class LiveVoiceManager(
     }
 
     private fun isTaskAction(name: String): Boolean =
-        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "control_visible_screen" ||
+        name == "launch_app" || name == "open_settings_page" || name == "set_flashlight" || name == "capture_camera_image" || name == "control_visible_screen" ||
             name == "choose_storage_folder" || name == "list_files" || name == "create_text_file" ||
             name == "edit_text_file" || name == "delete_file"
 
@@ -657,6 +675,7 @@ class LiveVoiceManager(
                 "launch_app" -> launchInstalledApp(args.optString("app_name"))
                 "open_settings_page" -> openSettingsPage(args.optString("page"))
                 "set_flashlight" -> setFlashlight(args.optBoolean("enabled", false))
+                "capture_camera_image" -> captureCameraImage()
                 "choose_storage_folder" -> fileManager.openFolderPicker()
                 "list_files" -> fileManager.listFiles()
                 "create_text_file" -> fileManager.createTextFile(
@@ -765,6 +784,132 @@ class LiveVoiceManager(
             false to "Android denied flashlight access. Grant camera permission in JARVIS App info."
         } catch (_: Exception) {
             false to "The flashlight could not be changed while another camera app is using it."
+        }
+    }
+
+    /**
+     * Capture exactly one JPEG from the rear camera and send it to the active
+     * Gemini Live session. The camera is closed immediately after the frame is
+     * received; this never starts a preview or a background camera loop.
+     */
+    private fun captureCameraImage(): Pair<Boolean, String> {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return false to "Camera permission is required. Grant it in JARVIS App info, then try again."
+        }
+
+        val socket = webSocket ?: return false to "The live JARVIS session is not connected."
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+            ?: return false to "Camera service is unavailable on this device."
+        val cameraId = try {
+            cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            } ?: cameraManager.cameraIdList.firstOrNull()
+        } catch (_: Exception) {
+            null
+        } ?: return false to "No camera is available on this device."
+
+        val reader = ImageReader.newInstance(1280, 720, ImageFormat.JPEG, 2)
+        val cameraThread = HandlerThread("JarvisCameraCapture").apply { start() }
+        val cameraHandler = Handler(cameraThread.looper)
+        val finished = CountDownLatch(1)
+        val completed = AtomicBoolean(false)
+        val succeeded = AtomicBoolean(false)
+        var camera: CameraDevice? = null
+        var session: CameraCaptureSession? = null
+
+        fun finish(success: Boolean) {
+            if (!completed.compareAndSet(false, true)) return
+            succeeded.set(success)
+            session?.close()
+            camera?.close()
+            reader.close()
+            cameraThread.quitSafely()
+            status(if (success) "CAMERA IMAGE SENT" else "CAMERA CAPTURE FAILED")
+            finished.countDown()
+        }
+
+        reader.setOnImageAvailableListener({ imageReader ->
+            val image = imageReader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val buffer = image.planes.firstOrNull()?.buffer
+                    ?: return@setOnImageAvailableListener
+                val jpeg = ByteArray(buffer.remaining()).also(buffer::get)
+                val message = JSONObject().apply {
+                    put("realtimeInput", JSONObject().apply {
+                        put("mediaChunks", JSONArray().put(
+                            JSONObject()
+                                .put("mimeType", "image/jpeg")
+                                .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+                        ))
+                    })
+                }
+                finish(socket.send(message.toString()))
+            } catch (_: Exception) {
+                finish(false)
+            } finally {
+                image.close()
+            }
+        }, cameraHandler)
+
+        try {
+            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                override fun onOpened(device: CameraDevice) {
+                    camera = device
+                    try {
+                        device.createCaptureSession(
+                            listOf(reader.surface),
+                            object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(newSession: CameraCaptureSession) {
+                                    session = newSession
+                                    try {
+                                        val request = device.createCaptureRequest(
+                                            CameraDevice.TEMPLATE_STILL_CAPTURE
+                                        ).apply {
+                                            addTarget(reader.surface)
+                                        }.build()
+                                        newSession.capture(
+                                            request,
+                                            object : CameraCaptureSession.CaptureCallback() {},
+                                            cameraHandler
+                                        )
+                                    } catch (_: Exception) {
+                                        finish(false)
+                                    }
+                                }
+
+                                override fun onConfigureFailed(_: CameraCaptureSession) {
+                                    finish(false)
+                                }
+                            },
+                            cameraHandler
+                        )
+                    } catch (_: Exception) {
+                        finish(false)
+                    }
+                }
+
+                override fun onDisconnected(device: CameraDevice) {
+                    device.close()
+                    finish(false)
+                }
+
+                override fun onError(device: CameraDevice, error: Int) {
+                    device.close()
+                    finish(false)
+                }
+            }, cameraHandler)
+        } catch (_: SecurityException) {
+            finish(false)
+        } catch (_: Exception) {
+            finish(false)
+        }
+
+        if (!finished.await(8, TimeUnit.SECONDS)) finish(false)
+        return if (succeeded.get()) {
+            true to "Captured one camera image and sent it to JARVIS for analysis."
+        } else {
+            false to "The camera capture could not be completed."
         }
     }
 
