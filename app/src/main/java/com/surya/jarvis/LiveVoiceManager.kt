@@ -17,6 +17,7 @@ import android.media.MediaRecorder
 import android.media.AudioManager
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -204,8 +205,8 @@ class LiveVoiceManager(
                                             "Be concise unless more detail is needed. " +
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
-                                            "Android protects many system settings: use the relevant Settings page or quick settings panel for Wi-Fi, Bluetooth, mobile data, location, and similar controls, and never claim that a protected setting changed unless the tool response confirms it. " +
-                                            "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools. " +
+                                            "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If JARVIS Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
+                                            "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
@@ -367,7 +368,7 @@ class LiveVoiceManager(
             put("name", "open_settings_page")
             put(
                 "description",
-                "Open one of the supported Android Settings screens. This only opens the screen; it does not change settings."
+                "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled JARVIS Accessibility. Never claim a setting changed without confirmation."
             )
             put(
                 "parameters",
@@ -694,7 +695,7 @@ class LiveVoiceManager(
             "general" -> Settings.ACTION_SETTINGS
             "quick_settings" -> "android.settings.QUICK_SETTINGS"
             "wireless" -> Settings.ACTION_WIRELESS_SETTINGS
-            "wifi" -> Settings.ACTION_WIFI_SETTINGS
+            "wifi" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
             "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
             "nfc" -> Settings.ACTION_NFC_SETTINGS
             "display" -> Settings.ACTION_DISPLAY_SETTINGS
