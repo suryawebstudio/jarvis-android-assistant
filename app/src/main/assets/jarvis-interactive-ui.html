@@ -51,7 +51,8 @@ canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 <div class="toast" id="toast">CORE INTERACTION</div>
 
 <section class="panel" id="settings"><div class="panelhead"><h2>SETTINGS</h2><button class="close" onclick="closePanels()">×</button></div>
-<div class="setting">Voice responses <input id="voiceResponses" type="checkbox" checked onchange="setVoiceResponses(this.checked)"></div><div class="setting">Sound effects <input id="soundEffects" type="checkbox" checked onchange="setSoundEffects(this.checked)"></div>
+ <div class="setting">Voice responses <input id="voiceResponses" type="checkbox" checked onchange="setVoiceResponses(this.checked)"></div><div class="setting">Sound effects <input id="soundEffects" type="checkbox" checked onchange="setSoundEffects(this.checked)"></div>
+ <div class="setting">Offline command processing <span style="color:#9fca63">READY</span></div>
 <div class="setting">Particle effects <input id="particleEffects" type="checkbox" checked onchange="setParticleEffects(this.checked)"></div><div class="setting">Auto listening <input id="autoListening" type="checkbox" onchange="setAutoListening(this.checked)"></div>
 <div class="setting">AI provider <span>Gemini ▾</span></div><div class="setting">Voice <span>English ▾</span></div>
  <button id="defaultAssistantAction" class="settingAction" onclick="requestDefaultAssistant()">Set as default assistant</button><button id="fullStorageAction" class="settingAction" onclick="toggleFullStorage()">Full storage access: OFF</button><button class="settingAction" onclick="openAccessibility()">Accessibility controls</button>

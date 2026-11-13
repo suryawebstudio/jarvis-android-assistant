@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private var receiverRegistered = false
     private val workerUrl = "https://jarvis-ai-backend.suryawebstudio.workers.dev"
     private val memoryStore by lazy { JarvisMemoryStore(applicationContext) }
+    private val offlineCommandRouter by lazy { OfflineCommandRouter(applicationContext) }
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -317,6 +318,14 @@ class MainActivity : AppCompatActivity() {
         val memoryCommand = handleMemoryCommand(cleanMessage)
         if (memoryCommand != null) {
             runJs("jarvisSpeak(${JSONObject.quote(memoryCommand)})")
+            return
+        }
+        val offlineCommand = offlineCommandRouter.route(cleanMessage)
+        if (offlineCommand != null) {
+            runOnUiThread {
+                offlineCommand.action?.invoke()
+                runJs("jarvisSpeak(${JSONObject.quote(offlineCommand.reply)});setMode('idle')")
+            }
             return
         }
         val memoryContext = memoryStore.all().joinToString("\n") { "- $it" }
