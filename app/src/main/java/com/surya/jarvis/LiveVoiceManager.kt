@@ -81,6 +81,7 @@ class LiveVoiceManager(
     private var speechReady = false
 
     private val fileManager = JarvisFileManager(context.applicationContext)
+    private val memoryStore = JarvisMemoryStore(context.applicationContext)
 
     init {
         textToSpeech = TextToSpeech(context.applicationContext) { result ->
@@ -214,7 +215,8 @@ class LiveVoiceManager(
                                             "For file work, use choose_storage_folder before accessing files if no approved folder exists, then use list_files, create_text_file, or edit_text_file. File names must be simple names in the approved folder; do not invent paths or claim access to all phone storage. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
                                             "When a tool response says confirmation is required, the Android app has already spoken the confirmation prompt; do not repeat a long confirmation speech, and wait for the user's answer. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
-                                            "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens."
+                                            "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens. " +
+                                            persistentMemoryInstruction()
                                         )
                                     )
                                 )
@@ -228,6 +230,14 @@ class LiveVoiceManager(
             }
 
             webSocket.send(setup.toString())
+        }
+
+        private fun persistentMemoryInstruction(): String {
+            val memories = memoryStore.all()
+            if (memories.isEmpty()) return ""
+            return " You may use these private persistent user memories when relevant: " +
+                memories.joinToString("; ") + ". Do not mention the memory system unless asked, " +
+                "and always follow the user's current request if it conflicts with an old memory."
         }
 
         override fun onMessage(

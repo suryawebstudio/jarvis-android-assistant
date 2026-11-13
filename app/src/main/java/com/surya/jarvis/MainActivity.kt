@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private var voiceMode = false
     private var receiverRegistered = false
     private val workerUrl = "https://jarvis-ai-backend.suryawebstudio.workers.dev"
+    private val memoryStore by lazy { JarvisMemoryStore(applicationContext) }
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -146,7 +147,17 @@ class MainActivity : AppCompatActivity() {
                 .put("particleEffects", preferences.getBoolean("particle_effects", true))
                 .put("autoListening", preferences.getBoolean("auto_listening", false))
                 .put("fullStorage", JarvisFileManager(this@MainActivity).isFullAccessEnabled())
+                .put("memoryCount", memoryStore.all().size)
                 .toString()
+        }
+
+        @JavascriptInterface
+        fun getMemories(): String = memoryStore.summary()
+
+        @JavascriptInterface
+        fun clearMemories() = runOnUiThread {
+            memoryStore.clear()
+            runJs("updateMemoryLabel(0);showToast('ALL MEMORIES CLEARED')")
         }
 
         @JavascriptInterface
@@ -193,6 +204,21 @@ class MainActivity : AppCompatActivity() {
     private fun sendMessageToBackend(message: String) {
         val cleanMessage = message.trim()
         if (cleanMessage.isEmpty()) return
+        rememberAutomaticFact(cleanMessage)
+        val memoryCommand = handleMemoryCommand(cleanMessage)
+        if (memoryCommand != null) {
+            runJs("jarvisSpeak(${JSONObject.quote(memoryCommand)})")
+            return
+        }
+        val memoryContext = memoryStore.all().joinToString("\n") { "- $it" }
+        val prompt = if (memoryContext.isBlank()) {
+            cleanMessage
+        } else {
+            "[PRIVATE JARVIS MEMORY]\n$memoryContext\n" +
+                "Use these memories only when relevant. Do not mention this memory block unless asked. " +
+                "If a memory conflicts with the user's current message, follow the current message.\n" +
+                "[END MEMORY]\nUser: $cleanMessage"
+        }
         executor.execute {
             var connection: HttpURLConnection? = null
             try {
@@ -204,7 +230,7 @@ class MainActivity : AppCompatActivity() {
                     setRequestProperty("Content-Type", "application/json")
                     setRequestProperty("Accept", "application/json")
                 }
-                connection.outputStream.use { it.write(JSONObject().put("message", cleanMessage).toString().toByteArray()) }
+                connection.outputStream.use { it.write(JSONObject().put("message", prompt).toString().toByteArray()) }
                 val responseCode = connection.responseCode
                 val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
                 val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -218,6 +244,48 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 connection?.disconnect()
             }
+        }
+    }
+
+    private fun handleMemoryCommand(message: String): String? {
+        val normalized = message.trim()
+        val lower = normalized.lowercase()
+        return when {
+            lower == "what do you remember" || lower == "what do you remember about me" ||
+                lower == "list my memories" -> memoryStore.summary()
+            lower == "forget everything" || lower == "forget all memories" ||
+                lower == "clear your memories" -> {
+                memoryStore.clear()
+                runJs("updateMemoryLabel(0)")
+                "I cleared all of my saved memories."
+            }
+            lower.startsWith("forget ") -> {
+                val query = normalized.substringAfter(' ', "").trim()
+                val removed = memoryStore.forget(query)
+                runJs("updateMemoryLabel(${memoryStore.all().size})")
+                if (removed > 0) "I forgot that memory." else "I could not find a matching memory."
+            }
+            lower.startsWith("remember that ") || lower.startsWith("remember ") -> {
+                val fact = normalized.substring(8).trimStart()
+                    .let { if (it.startsWith("that ", ignoreCase = true)) it.substring(5) else it }
+                val saved = memoryStore.remember(fact)
+                runJs("updateMemoryLabel(${memoryStore.all().size})")
+                if (saved) "I will remember that." else "I already remember that, or the memory was too long."
+            }
+            else -> null
+        }
+    }
+
+    private fun rememberAutomaticFact(message: String) {
+        val fact = when {
+            message.matches(Regex("(?i)my name is .+")) -> message
+            message.matches(Regex("(?i)i live in .+")) -> message
+            message.matches(Regex("(?i)i work as .+")) -> message
+            message.matches(Regex("(?i)my favorite .+ is .+")) -> message
+            else -> null
+        } ?: return
+        if (memoryStore.remember(fact)) {
+            runJs("updateMemoryLabel(${memoryStore.all().size})")
         }
     }
 

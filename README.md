@@ -37,6 +37,10 @@ JARVIS can manage files only inside a folder that the user explicitly selects th
 
 The app also supports an opt-in **Full Storage Access** toggle in the main settings area. The toggle first shows a warning and then opens Android's `MANAGE_EXTERNAL_STORAGE` screen; JARVIS uses full shared-storage mode only after both Android permission and the in-app toggle are enabled. Turning the toggle off returns to selected-folder mode. Full mode currently manages top-level entries under shared storage and restricts voice-created or edited content to small text files; deletion remains confirmation-gated.
 
+## Persistent memory
+
+JARVIS has a private on-device memory store backed by Android `SharedPreferences`, so saved memories remain available after the app is closed or restarted. Say or type **“remember that …”** to save a fact, or use common personal facts such as “my name is …”, “I live in …”, “I work as …”, and “my favorite … is …”. Use **“what do you remember”**, **“forget …”**, or **“forget all memories”** to inspect or remove memories. The Settings panel also shows the memory count and provides a button to clear all memories. Saved facts are included as private context for normal chat and live voice sessions; full conversation transcripts are not stored.
+
 ## Open in AndroidIDE
 
 Use AndroidIDE's **Clone Git repo** option with:
