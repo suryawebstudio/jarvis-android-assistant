@@ -915,7 +915,7 @@ class LiveVoiceManager(
     }
 
     private fun playAudio(bytes: ByteArray) {
-        if (bytes.isEmpty() || !setupComplete) return
+        if (bytes.isEmpty() || !setupComplete || !voiceResponsesEnabled()) return
 
         val chunk = PlaybackChunk(playbackGeneration.get(), bytes)
         if (!playbackQueue.offerLast(chunk)) {
@@ -944,6 +944,10 @@ class LiveVoiceManager(
             onStatus(message)
         }
     }
+
+    private fun voiceResponsesEnabled(): Boolean =
+        context.getSharedPreferences("jarvis_ui", Context.MODE_PRIVATE)
+            .getBoolean("voice_responses", true)
 
     private fun fail(message: String) {
         running.set(false)

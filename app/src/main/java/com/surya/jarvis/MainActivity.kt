@@ -1,14 +1,19 @@
 package com.surya.jarvis
+
 import android.Manifest
 import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
-import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -20,205 +25,150 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
-
     private lateinit var binding: ActivityMainBinding
-
     private val executor = Executors.newSingleThreadExecutor()
-
     private var voiceMode = false
     private var receiverRegistered = false
+    private val workerUrl = "https://jarvis-ai-backend.suryawebstudio.workers.dev"
 
-    private val workerUrl =
-        "https://jarvis-ai-backend.suryawebstudio.workers.dev"
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) requestNotificationThenStartVoice()
+        else runJs("showToast('MICROPHONE PERMISSION DENIED')")
+    }
 
-    private val micPermissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted) {
-                requestNotificationThenStartVoice()
-            } else {
-                binding.statusText.text = "MICROPHONE PERMISSION DENIED"
-            }
-        }
-
-    private val notificationPermissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted) {
-                beginVoiceConversation()
-            } else {
-                binding.statusText.text = "NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE"
-            }
-        }
-
-    private val voiceReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: Intent?) {
-            when (intent?.action) {
-                JarvisVoiceForegroundService.ACTION_STATUS -> {
-                    val status = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_STATUS).orEmpty()
-                    if (status.isNotBlank()) binding.statusText.text = status
-                    if (status == "VOICE MODE OFF") {
-                        voiceMode = false
-                        binding.micButton.text = "MIC - TAP TO SPEAK"
-                    }
-                }
-
-                JarvisVoiceForegroundService.ACTION_USER_SPEECH -> {
-                    val spokenText = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_SPEECH).orEmpty()
-                    if (spokenText.isNotBlank()) {
-                        binding.chatHistory.append("\n\nYOU:\n$spokenText")
-                    }
-                }
-            }
-        }
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) beginVoiceConversation()
+        else runJs("showToast('NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE')")
     }
 
     private val storageFolderLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
-        binding.statusText.text = if (uri == null) {
+        val message = if (uri == null) {
             "STORAGE FOLDER NOT SELECTED"
         } else {
             JarvisFileManager(this).saveFolder(uri).second
+        }
+        runJs("showToast(${JSONObject.quote(message)})")
+    }
+
+    private val voiceReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                JarvisVoiceForegroundService.ACTION_STATUS -> {
+                    val status = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_STATUS).orEmpty()
+                    when {
+                        status == "JARVIS LIVE — LISTENING" -> runJs("setMode('listening')")
+                        status == "VOICE MODE OFF" -> {
+                            voiceMode = false
+                            runJs("setMode('idle');document.getElementById('micLabel').textContent='TAP TO SPEAK'")
+                        }
+                        status.contains("ERROR") || status.contains("FAILED") || status.contains("REQUIRED") -> {
+                            voiceMode = false
+                            runJs("setMode('idle');showToast(${JSONObject.quote(status)})")
+                        }
+                        status.isNotBlank() -> runJs("setMode('thinking')")
+                    }
+                }
+                JarvisVoiceForegroundService.ACTION_USER_SPEECH -> {
+                    val spokenText = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_SPEECH).orEmpty()
+                    if (spokenText.isNotBlank()) {
+                        runJs("addChatFromAndroid(${JSONObject.quote(spokenText)})")
+                    }
+                }
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        setSupportActionBar(binding.toolbar)
-
+        configureWebView()
         if (intent?.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) {
             storageFolderLauncher.launch(null)
         }
+    }
 
-        if (JarvisVoiceForegroundService.isRunning) {
-            voiceMode = true
-            binding.micButton.text = "STOP VOICE"
-            binding.statusText.text = "JARVIS LISTENING IN BACKGROUND"
-        } else {
-            binding.statusText.text = "SYSTEM ONLINE"
+    private fun configureWebView() {
+        binding.jarvisWebView.settings.javaScriptEnabled = true
+        binding.jarvisWebView.settings.domStorageEnabled = true
+        binding.jarvisWebView.settings.allowFileAccess = true
+        binding.jarvisWebView.settings.allowContentAccess = false
+        binding.jarvisWebView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                request.url.scheme != "file"
+        }
+        binding.jarvisWebView.addJavascriptInterface(JarvisBridge(), "AndroidJarvis")
+        binding.jarvisWebView.loadUrl("file:///android_asset/jarvis-interactive-ui.html")
+    }
+
+    private inner class JarvisBridge {
+        @JavascriptInterface
+        fun startVoice() = runOnUiThread {
+            if (voiceMode) stopVoice() else requestVoiceStart()
         }
 
-        binding.chatButton.setOnClickListener {
-            val visible =
-                binding.chatPanel.visibility == View.VISIBLE
+        @JavascriptInterface
+        fun stopVoice() = runOnUiThread { stopVoice() }
 
-            binding.chatPanel.visibility =
-                if (visible) View.GONE else View.VISIBLE
-
-            binding.chatButton.text =
-                if (visible) "OPEN CHAT" else "CLOSE CHAT"
+        @JavascriptInterface
+        fun sendMessage(message: String) {
+            sendMessageToBackend(message)
         }
 
-        binding.sendButton.setOnClickListener {
-            sendMessage()
+        @JavascriptInterface
+        fun setVoiceResponses(enabled: Boolean) = saveUiPreference("voice_responses", enabled)
+
+        @JavascriptInterface
+        fun setSoundEffects(enabled: Boolean) = saveUiPreference("sound_effects", enabled)
+
+        @JavascriptInterface
+        fun setParticleEffects(enabled: Boolean) = saveUiPreference("particle_effects", enabled)
+
+        @JavascriptInterface
+        fun setAutoListening(enabled: Boolean) = runOnUiThread {
+            saveUiPreference("auto_listening", enabled)
+            if (enabled && !voiceMode) requestVoiceStart()
+            if (!enabled && voiceMode) stopVoice()
         }
 
-        binding.messageInput.setOnEditorActionListener {
-            _, _, _ ->
-            sendMessage()
-            true
-        }
+        @JavascriptInterface
+        fun toggleFullStorage() = runOnUiThread { toggleFullStorageAccess() }
 
-        binding.micButton.setOnClickListener {
-            if (voiceMode) {
-                voiceMode = false
-                JarvisVoiceForegroundService.stop(this)
-
-                binding.micButton.text = "MIC - TAP TO SPEAK"
-                binding.statusText.text = "VOICE MODE OFF"
-            } else {
-                if (
-                    ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    requestNotificationThenStartVoice()
-                } else {
-                    micPermissionLauncher.launch(
-                        Manifest.permission.RECORD_AUDIO
-                    )
-                }
-            }
-        }
-
-        binding.settingsButton.setOnClickListener {
+        @JavascriptInterface
+        fun openAccessibility() = runOnUiThread {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            binding.responseText.text =
-                "Enable JARVIS under Downloaded apps in Android Accessibility settings, then return here."
         }
-        binding.fullStorageButton.setOnClickListener {
-            toggleFullStorageAccess()
-        }
-        updateFullStorageButton()
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::binding.isInitialized) updateFullStorageButton()
-    }
-
-    private fun toggleFullStorageAccess() {
-        val fileManager = JarvisFileManager(this)
-        if (fileManager.isFullAccessEnabled()) {
-            fileManager.setFullAccessEnabled(false)
-            updateFullStorageButton()
-            binding.statusText.text = "SELECTED-FOLDER STORAGE MODE"
-            binding.responseText.text = "Full storage access is off. Choose a folder before managing files."
-            return
-        }
-        if (fileManager.fullAccessGranted()) {
-            fileManager.setFullAccessEnabled(true)
-            updateFullStorageButton()
-            binding.statusText.text = "FULL STORAGE ACCESS ENABLED"
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Enable full storage access?")
-            .setMessage(
-                "This lets JARVIS list, create, edit, and delete files and folders in shared storage. " +
-                    "Android will ask you to approve this in Settings. You can turn it off here at any time."
-            )
-            .setNegativeButton("CANCEL", null)
-            .setPositiveButton("OPEN SETTINGS") { _, _ ->
-                val result = fileManager.openFullAccessSettings()
-                binding.statusText.text = result.second
-            }
-            .show()
-    }
-
-    private fun updateFullStorageButton() {
-        val fileManager = JarvisFileManager(this)
-        binding.fullStorageButton.text = if (fileManager.isFullAccessEnabled()) {
-            "FULL STORAGE ACCESS: ON"
+    private fun requestVoiceStart() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            requestNotificationThenStartVoice()
         } else {
-            "FULL STORAGE ACCESS: OFF"
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     private fun beginVoiceConversation() {
         voiceMode = true
-
-        binding.micButton.text = "STOP VOICE"
-        binding.statusText.text = "CONNECTING TO JARVIS LIVE..."
-
+        runJs("setMode('thinking');document.getElementById('micLabel').textContent='STOP LISTENING'")
         JarvisVoiceForegroundService.start(this)
     }
 
+    private fun stopVoice() {
+        voiceMode = false
+        JarvisVoiceForegroundService.stop(this)
+        runJs("setMode('idle');document.getElementById('micLabel').textContent='TAP TO SPEAK'")
+    }
+
     private fun requestNotificationThenStartVoice() {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
@@ -226,117 +176,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendMessage() {
-        val message =
-            binding.messageInput.text.toString().trim()
-
-        if (message.isEmpty()) return
-
-        binding.chatHistory.append(
-            "\n\nYOU:\n$message"
-        )
-
-        binding.messageInput.text.clear()
-
-        binding.sendButton.isEnabled = false
-        binding.sendButton.text = "THINKING..."
-        binding.statusText.text = "JARVIS IS THINKING..."
-
+    private fun sendMessageToBackend(message: String) {
+        val cleanMessage = message.trim()
+        if (cleanMessage.isEmpty()) return
         executor.execute {
             var connection: HttpURLConnection? = null
-
             try {
-                connection =
-                    URL(workerUrl).openConnection()
-                        as HttpURLConnection
-
-                connection.requestMethod = "POST"
-                connection.connectTimeout = 20000
-                connection.readTimeout = 90000
-                connection.doOutput = true
-
-                connection.setRequestProperty(
-                    "Content-Type",
-                    "application/json"
-                )
-
-                connection.setRequestProperty(
-                    "Accept",
-                    "application/json"
-                )
-
-                val request = JSONObject()
-                request.put("message", message)
-
-                connection.outputStream.use { output ->
-                    output.write(
-                        request.toString().toByteArray(Charsets.UTF_8)
-                    )
+                connection = (URL(workerUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 20_000
+                    readTimeout = 90_000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "application/json")
                 }
-
+                connection.outputStream.use { it.write(JSONObject().put("message", cleanMessage).toString().toByteArray()) }
                 val responseCode = connection.responseCode
-
-                val responseStream =
-                    if (responseCode in 200..299) {
-                        connection.inputStream
-                    } else {
-                        connection.errorStream
-                    }
-
-                val responseText =
-                    responseStream?.bufferedReader()
-                        ?.use { it.readText() } ?: ""
-
-                if (responseCode !in 200..299) {
-                    throw Exception("HTTP $responseCode: $responseText")
-                }
-
+                val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+                val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (responseCode !in 200..299) throw IllegalStateException("HTTP $responseCode")
                 val json = JSONObject(responseText)
-
-                if (!json.optBoolean("success", false)) {
-                    throw Exception(
-                        json.optString("error", "AI request failed")
-                    )
-                }
-
-                val reply = json.optString("reply", "")
-
-                runOnUiThread {
-                    binding.chatHistory.append(
-                        "\n\nJARVIS:\n$reply"
-                    )
-
-                    binding.responseText.text = reply
-
-                    binding.sendButton.isEnabled = true
-                    binding.sendButton.text = "SEND"
-
-                    if (!voiceMode) {
-                        binding.statusText.text = "SYSTEM ONLINE"
-                    }
-
-                    binding.mainScroll.post {
-                        binding.mainScroll.fullScroll(
-                            View.FOCUS_DOWN
-                        )
-                    }
-                }
-
-            } catch (e: Exception) {
-                runOnUiThread {
-                    binding.chatHistory.append(
-                        "\n\nJARVIS ERROR:\n${e.message}"
-                    )
-
-                    binding.statusText.text = "CONNECTION ERROR"
-                    binding.sendButton.isEnabled = true
-                    binding.sendButton.text = "SEND"
-                }
-
+                if (!json.optBoolean("success", false)) throw IllegalStateException("AI request failed")
+                val reply = json.optString("reply").ifBlank { "I did not receive a response." }
+                runJs("jarvisSpeak(${JSONObject.quote(reply)});setMode('idle')")
+            } catch (_: Exception) {
+                runJs("jarvisSpeak('I could not reach the assistant right now.');setMode('idle')")
             } finally {
                 connection?.disconnect()
             }
         }
+    }
+
+    private fun toggleFullStorageAccess() {
+        val fileManager = JarvisFileManager(this)
+        if (fileManager.isFullAccessEnabled()) {
+            fileManager.setFullAccessEnabled(false)
+            runJs("showToast('FULL STORAGE ACCESS OFF')")
+            return
+        }
+        if (fileManager.fullAccessGranted()) {
+            fileManager.setFullAccessEnabled(true)
+            runJs("showToast('FULL STORAGE ACCESS ON')")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Enable full storage access?")
+            .setMessage("This lets JARVIS list, create, edit, and delete shared-storage files. Android will ask you to approve this in Settings.")
+            .setNegativeButton("CANCEL", null)
+            .setPositiveButton("OPEN SETTINGS") { _, _ ->
+                runJs("showToast(${JSONObject.quote(fileManager.openFullAccessSettings().second)})")
+            }
+            .show()
+    }
+
+    private fun saveUiPreference(key: String, enabled: Boolean) {
+        getSharedPreferences("jarvis_ui", MODE_PRIVATE).edit().putBoolean(key, enabled).apply()
+    }
+
+    private fun runJs(script: String) {
+        if (!::binding.isInitialized) return
+        runOnUiThread { binding.jarvisWebView.evaluateJavascript("(function(){try{$script}catch(e){}})();", null) }
     }
 
     override fun onStart() {
@@ -346,7 +245,7 @@ class MainActivity : AppCompatActivity() {
             addAction(JarvisVoiceForegroundService.ACTION_USER_SPEECH)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(voiceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(voiceReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(voiceReceiver, filter)
@@ -357,9 +256,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent?.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) {
-            storageFolderLauncher.launch(null)
-        }
+        if (intent.action == JarvisFileManager.ACTION_CHOOSE_FOLDER) storageFolderLauncher.launch(null)
     }
 
     override fun onStop() {
@@ -372,6 +269,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         executor.shutdownNow()
+        binding.jarvisWebView.removeJavascriptInterface("AndroidJarvis")
+        binding.jarvisWebView.destroy()
         super.onDestroy()
     }
 }

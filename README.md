@@ -9,6 +9,11 @@ See [`PROJECT_HANDOVER.md`](PROJECT_HANDOVER.md) for the architecture, work comp
 - `app/` — Android application source and resources.
 - `gradle/` and Gradle wrapper — project build configuration.
 - `app/src/main/java/com/surya/jarvis/LiveVoiceManager.kt` — Live API WebSocket/audio manager.
+- `app/src/main/assets/jarvis-interactive-ui.html` — the touch-friendly JARVIS core UI, panels, chat composer, history, and settings controls.
+
+## Interactive core UI
+
+The main screen now loads the supplied interactive core UI locally in a WebView. Its rotating particle core, tap/drag/hold interactions, Settings/History/Chat panels, microphone control, message composers, particle/sound/voice/auto-listening toggles, full-storage access action, and Accessibility action are connected to native Android behavior through the restricted `AndroidJarvis` bridge. The WebView loads only the bundled local asset; external URL navigation and content access are disabled.
 
 ## Recent Live API fix
 
