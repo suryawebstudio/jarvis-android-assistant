@@ -73,12 +73,12 @@ class JarvisVoiceForegroundService : Service() {
                 }
 
                 ACTION_START -> {
-                    startForeground(NOTIFICATION_ID, buildNotification("Starting JARVIS voice listening"))
+                    startForeground(NOTIFICATION_ID, buildNotification("Starting MARK voice listening"))
                     if (!isRunning) {
                         isRunning = true
-                        sendStatus("CONNECTING TO JARVIS LIVE...")
+                        sendStatus("CONNECTING TO MARK LIVE...")
                         voiceManager?.startListening()
-                        updateNotification("JARVIS is listening")
+                        updateNotification("MARK is listening")
                     }
                 }
             }
@@ -132,7 +132,7 @@ class JarvisVoiceForegroundService : Service() {
     private fun buildNotification(status: String) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("J.A.R.V.I.S. voice control")
+            .setContentTitle("MARK voice control")
             .setContentText(status)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -161,10 +161,10 @@ class JarvisVoiceForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "JARVIS voice control",
+                "MARK voice control",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows when JARVIS is listening in the background."
+                description = "Shows when MARK is listening in the background."
                 setSound(null, null)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

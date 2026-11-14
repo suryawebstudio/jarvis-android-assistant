@@ -19,7 +19,7 @@ import kotlin.math.sqrt
 
 /**
  * User-enabled, sensor-only fallback. It does not use the microphone; it waits
- * for a shake and then asks the existing voice service to start JARVIS Live.
+ * for a shake and then asks the existing voice service to start MARK Live.
  */
 class JarvisGestureWakeService : Service(), SensorEventListener {
     companion object {
@@ -102,8 +102,8 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
 
     private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-        .setContentTitle("JARVIS shake wake enabled")
-        .setContentText("Shake the phone to start JARVIS voice mode")
+        .setContentTitle("MARK shake wake enabled")
+        .setContentText("Shake the phone to start MARK voice mode")
         .setOngoing(true)
         .setCategory(Notification.CATEGORY_SERVICE)
         .setContentIntent(
@@ -121,7 +121,7 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "JARVIS gesture wake",
+                    "MARK gesture wake",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
                     description = "Shows while the user-enabled shake wake sensor is active."

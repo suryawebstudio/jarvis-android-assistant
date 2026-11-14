@@ -200,18 +200,18 @@ class LiveVoiceManager(
                                     JSONArray().put(
                                         JSONObject().put(
                                             "text",
-                                            "You are JARVIS, an intelligent personal AI assistant. " +
+                                            "You are MARK, an intelligent personal AI assistant. " +
                                             "Speak naturally, clearly and conversationally. " +
                                             "Be concise unless more detail is needed. " +
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
-                                            "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If JARVIS Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
-                                            "When JARVIS Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. " +
+                                            "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If MARK Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
+                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
                                             "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
-                                            "For file work, JARVIS uses Android's full shared-storage access only. If it is not enabled, tell the user to enable Full storage access from the JARVIS Settings panel and Android's permission screen; do not ask the user to select a folder. Use simple file names and do not invent paths. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
-                                            "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal JARVIS Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
+                                            "For file work, MARK uses Android's full shared-storage access only. If it is not enabled, tell the user to enable Full storage access from the MARK Settings panel and Android's permission screen; do not ask the user to select a folder. Use simple file names and do not invent paths. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
+                                            "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal MARK Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
                                             "If the user says stop, cancel, or abort, call cancel_task immediately. " +
                                             "Never bypass passwords, biometrics, CAPTCHAs, Android permission dialogs, or security screens. " +
                                             persistentMemoryInstruction()
@@ -266,7 +266,7 @@ class LiveVoiceManager(
 
                 if (json.has("setupComplete")) {
                     setupComplete = true
-                    status("JARVIS LIVE — LISTENING")
+                    status("MARK LIVE — LISTENING")
                     startPlayback()
                     startAudioCapture()
                     return
@@ -368,7 +368,7 @@ class LiveVoiceManager(
             put("name", "open_settings_page")
             put(
                 "description",
-                "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled JARVIS Accessibility. Never claim a setting changed without confirmation."
+                "Open one of the supported Android Settings screens or a system control panel. For Wi-Fi, use the Android Wi-Fi panel when available; for Bluetooth, open Bluetooth Settings. Android may require the user to tap protected switches, unless the visible switch can be controlled through enabled MARK Accessibility. Never claim a setting changed without confirmation."
             )
             put(
                 "parameters",
@@ -412,7 +412,7 @@ class LiveVoiceManager(
             put("name", "capture_camera_image")
             put(
                 "description",
-                "Capture one still image from the rear camera and send it to the active JARVIS vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
+                "Capture one still image from the rear camera and send it to the active MARK vision session. Use only after the user explicitly asks what the camera sees. This never starts continuous recording and requires camera permission."
             )
             put("parameters", JSONObject().apply {
                 put("type", "OBJECT")
@@ -446,13 +446,13 @@ class LiveVoiceManager(
 
         val cancelTask = JSONObject().apply {
             put("name", "cancel_task")
-            put("description", "Stop the current multi-step JARVIS task and clear its task state. Use when the user says stop, cancel, or abort.")
+            put("description", "Stop the current multi-step MARK task and clear its task state. Use when the user says stop, cancel, or abort.")
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
         val startTask = JSONObject().apply {
             put("name", "start_task")
-            put("description", "Start or reset a new multi-step JARVIS task before executing a complex user request.")
+            put("description", "Start or reset a new multi-step MARK task before executing a complex user request.")
             put("parameters", JSONObject().put("type", "OBJECT").put("properties", JSONObject()))
         }
 
@@ -558,7 +558,7 @@ class LiveVoiceManager(
         if (name == "cancel_task") {
             clearTaskState()
             status("TASK CANCELLED")
-            return true to "The current JARVIS task was cancelled."
+            return true to "The current MARK task was cancelled."
         }
 
         if (name == "inspect_visible_screen") {
@@ -651,7 +651,7 @@ class LiveVoiceManager(
                 "inspect_visible_screen" -> if (JarvisAccessibilityService.isEnabled()) {
                     true to JarvisAccessibilityService.inspectScreen()
                 } else {
-                    false to "Accessibility control is not enabled. Enable JARVIS in Android Accessibility settings first."
+                    false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first."
                 }
                 "control_visible_screen" -> JarvisAccessibilityService.control(
                     action = args.optString("action"),
@@ -729,7 +729,7 @@ class LiveVoiceManager(
 
     private fun setFlashlight(enabled: Boolean): Pair<Boolean, String> {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            return false to "Camera permission is required for flashlight control. Enable it in JARVIS App info, then try again."
+            return false to "Camera permission is required for flashlight control. Enable it in MARK App info, then try again."
         }
 
         return try {
@@ -742,7 +742,7 @@ class LiveVoiceManager(
             status(if (enabled) "FLASHLIGHT ON" else "FLASHLIGHT OFF")
             true to if (enabled) "Flashlight turned on." else "Flashlight turned off."
         } catch (_: SecurityException) {
-            false to "Android denied flashlight access. Grant camera permission in JARVIS App info."
+            false to "Android denied flashlight access. Grant camera permission in MARK App info."
         } catch (_: Exception) {
             false to "The flashlight could not be changed while another camera app is using it."
         }
@@ -755,10 +755,10 @@ class LiveVoiceManager(
      */
     private fun captureCameraImage(): Pair<Boolean, String> {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            return false to "Camera permission is required. Grant it in JARVIS App info, then try again."
+            return false to "Camera permission is required. Grant it in MARK App info, then try again."
         }
 
-        val socket = webSocket ?: return false to "The live JARVIS session is not connected."
+        val socket = webSocket ?: return false to "The live MARK session is not connected."
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
             ?: return false to "Camera service is unavailable on this device."
         val cameraId = try {
@@ -881,7 +881,7 @@ class LiveVoiceManager(
 
         if (!finished.await(8, TimeUnit.SECONDS)) finish(false)
         return if (succeeded.get()) {
-            true to "Captured one camera image and sent it to JARVIS for analysis."
+            true to "Captured one camera image and sent it to MARK for analysis."
         } else {
             false to "The camera capture could not be completed."
         }
@@ -938,7 +938,7 @@ class LiveVoiceManager(
                     as AudioManager
 
             // Keep output on Android's normal media route so volume buttons
-            // control JARVIS playback with the media/music volume stream.
+            // control MARK playback with the media/music volume stream.
             audioManager.mode = AudioManager.MODE_NORMAL
 
             recorder.startRecording()
@@ -1089,7 +1089,7 @@ class LiveVoiceManager(
                 } catch (_: Exception) {
                 }
             }
-        }, "Jarvis-Audio-Playback").apply {
+        }, "MARK-Audio-Playback").apply {
             isDaemon = true
             start()
         }

@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import java.util.Locale
 
 /**
- * Provides narrow, visible-screen automation for JARVIS.
+ * Provides narrow, visible-screen automation for MARK.
  *
  * Android requires the user to enable this service manually in Accessibility
  * settings. It never searches hidden app content and never bypasses security
@@ -22,7 +22,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         fun isEnabled(): Boolean = current != null
 
         fun inspectScreen(): String = current?.describeVisibleScreen()
-            ?: "Accessibility control is not enabled. Open Android Accessibility settings and enable JARVIS."
+            ?: "Accessibility control is not enabled. Open Android Accessibility settings and enable MARK."
 
         fun control(
             action: String,
@@ -36,7 +36,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             text,
             direction,
             confirmed
-        ) ?: (false to "Accessibility control is not enabled. Enable JARVIS in Android Accessibility settings first.")
+        ) ?: (false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first.")
     }
 
     override fun onServiceConnected() {
@@ -45,7 +45,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // The current screen is queried only when JARVIS receives an explicit
+        // The current screen is queried only when MARK receives an explicit
         // inspect/control command. No screen contents are stored or uploaded.
     }
 

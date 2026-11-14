@@ -36,7 +36,7 @@ class OfflineCommandRouter(private val context: Context) {
                 "Today is ${DateFormat.getDateInstance(DateFormat.LONG).format(Date())}."
             )
             normalized in setOf("who are you", "what is your name", "identify yourself") -> Result(
-                "I am JARVIS, your Android assistant."
+                "I am MARK, your Android assistant."
             )
             normalized in setOf("status", "system status", "are you online") -> Result(
                 "Offline command mode is ready. Gemini remains available for advanced requests."
@@ -68,7 +68,7 @@ class OfflineCommandRouter(private val context: Context) {
     private fun flashlightReply(enabled: Boolean): String = if (
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
     ) {
-        "Camera permission is required before I can control the flashlight. Enable it in JARVIS permissions, then try again."
+        "Camera permission is required before I can control the flashlight. Enable it in MARK permissions, then try again."
     } else if (findFlashCamera() == null) {
         "This phone does not expose a controllable flashlight."
     } else {

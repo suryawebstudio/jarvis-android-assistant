@@ -6,7 +6,7 @@ import android.speech.SpeechRecognizer
 
 /**
  * Compatibility entry point required by VoiceInteractionService metadata on
- * older Android releases. JARVIS uses Gemini Live AudioRecord for recognition.
+ * older Android releases. MARK uses Gemini Live AudioRecord for recognition.
  */
 class JarvisRecognitionService : RecognitionService() {
     override fun onStartListening(intent: Intent?, callback: Callback?) {

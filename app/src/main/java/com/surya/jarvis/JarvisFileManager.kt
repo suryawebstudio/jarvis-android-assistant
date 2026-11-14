@@ -47,14 +47,14 @@ class JarvisFileManager(private val context: Context) {
                     Uri.parse("package:${context.packageName}")
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            true to "Enable Allow access to manage all files for JARVIS, then return here."
+            true to "Enable Allow access to manage all files for MARK, then return here."
         } catch (_: Exception) {
             false to "Android could not open the full storage access settings."
         }
     }
 
     fun listFiles(): Pair<Boolean, String> {
-        if (!isFullAccessEnabled()) return false to "Enable Full storage access for JARVIS in Android Settings first."
+        if (!isFullAccessEnabled()) return false to "Enable Full storage access for MARK in Android Settings first."
         val entries = sharedStorageRoot()?.listFiles()?.sortedBy { it.name.lowercase(Locale.ROOT) }
             ?: return false to "Shared storage is not available."
         if (entries.isEmpty()) return true to "Shared storage is empty."
@@ -78,7 +78,7 @@ class JarvisFileManager(private val context: Context) {
 
     fun shareFile(name: String): Pair<Boolean, String> {
         val safeName = validateName(name) ?: return false to "That file name is not allowed."
-        if (!isFullAccessEnabled()) return false to "Enable Full storage access for JARVIS in Android Settings first."
+        if (!isFullAccessEnabled()) return false to "Enable Full storage access for MARK in Android Settings first."
         return try {
             val file = File(sharedStorageRoot() ?: return false to "Shared storage is not available.", safeName)
             if (!file.isFile) return false to "I could not find $safeName in shared storage."
@@ -101,7 +101,7 @@ class JarvisFileManager(private val context: Context) {
 
     fun createTextFile(name: String, content: String): Pair<Boolean, String> {
         val safeName = validateName(name) ?: return false to "Use a simple file name without path separators."
-        if (!isFullAccessEnabled()) return false to "Enable Full storage access for JARVIS in Android Settings first."
+        if (!isFullAccessEnabled()) return false to "Enable Full storage access for MARK in Android Settings first."
         val root = sharedStorageRoot() ?: return false to "Shared storage is not available."
         val file = File(root, safeName)
         if (file.exists()) return false to "A file or folder named $safeName already exists."
@@ -111,7 +111,7 @@ class JarvisFileManager(private val context: Context) {
 
     fun editTextFile(name: String, content: String): Pair<Boolean, String> {
         val safeName = validateName(name) ?: return false to "Use a simple file name without path separators."
-        if (!isFullAccessEnabled()) return false to "Enable Full storage access for JARVIS in Android Settings first."
+        if (!isFullAccessEnabled()) return false to "Enable Full storage access for MARK in Android Settings first."
         val root = sharedStorageRoot() ?: return false to "Shared storage is not available."
         val file = File(root, safeName)
         if (!file.isFile) return false to "$safeName is not a regular file."
@@ -122,7 +122,7 @@ class JarvisFileManager(private val context: Context) {
 
     fun deleteFile(name: String): Pair<Boolean, String> {
         val safeName = validateName(name) ?: return false to "Use a file name without path separators."
-        if (!isFullAccessEnabled()) return false to "Enable Full storage access for JARVIS in Android Settings first."
+        if (!isFullAccessEnabled()) return false to "Enable Full storage access for MARK in Android Settings first."
         val root = sharedStorageRoot() ?: return false to "Shared storage is not available."
         val file = File(root, safeName)
         if (!file.exists()) return false to "I could not find $safeName in shared storage."

@@ -21,7 +21,7 @@ import org.vosk.android.StorageService
 
 /**
  * Fully local wake-word listener. Vosk reads microphone PCM and recognizes only
- * the small grammar containing "jarvis" and unknown speech. No Android
+ * the small grammar containing "mark" and unknown speech. No Android
  * SpeechRecognizer, network speech provider, or Gemini connection is used here.
  */
 class JarvisWakeWordService : Service() {
@@ -86,11 +86,11 @@ class JarvisWakeWordService : Service() {
                     val localRecognizer = Recognizer(
                         unpackedModel,
                         SAMPLE_RATE,
-                        "[\"jarvis\", \"[unk]\"]"
+                        "[\"mark\", \"[unk]\"]"
                     )
                     recognizer = localRecognizer
                     speechService = SpeechService(localRecognizer, SAMPLE_RATE)
-                    updateNotification("Offline wake word active — say Jarvis")
+                    updateNotification("Offline wake word active — say Mark")
                     speechService?.startListening(voskListener)
                 } catch (_: Exception) {
                     stopSelf()
@@ -135,7 +135,7 @@ class JarvisWakeWordService : Service() {
         )
         return candidates.any { candidate ->
             candidate.lowercase().split(Regex("[^a-z0-9]+"))
-                .any { it == "jarvis" || it == "jarvis." }
+                .any { it == "mark" || it == "mark." }
         }
     }
 
@@ -176,7 +176,7 @@ class JarvisWakeWordService : Service() {
 
     private fun buildNotification(status: String): Notification = Notification.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-        .setContentTitle("JARVIS offline wake word enabled")
+        .setContentTitle("MARK offline wake word enabled")
         .setContentText(status)
         .setOngoing(true)
         .setCategory(Notification.CATEGORY_SERVICE)
@@ -198,10 +198,10 @@ class JarvisWakeWordService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "JARVIS offline wake word",
+                "MARK offline wake word",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows while JARVIS locally listens for its wake word."
+                description = "Shows while MARK locally listens for its wake word."
                 setSound(null, null)
             }
         )

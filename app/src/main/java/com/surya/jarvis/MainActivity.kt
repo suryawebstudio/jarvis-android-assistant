@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
     private val defaultAssistantLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        runJs("updateDefaultAssistantLabel();showToast(${JSONObject.quote(if (isDefaultAssistant()) "JARVIS IS DEFAULT ASSISTANT" else "DEFAULT ASSISTANT NOT CHANGED")})")
+        runJs("updateDefaultAssistantLabel();showToast(${JSONObject.quote(if (isDefaultAssistant()) "MARK IS DEFAULT ASSISTANT" else "DEFAULT ASSISTANT NOT CHANGED")})")
     }
 
     private var pendingAssistantPermission = ""
@@ -69,7 +69,7 @@ class MainActivity : AppCompatActivity() {
                 JarvisVoiceForegroundService.ACTION_STATUS -> {
                     val status = intent.getStringExtra(JarvisVoiceForegroundService.EXTRA_STATUS).orEmpty()
                     when {
-                        status == "JARVIS LIVE — LISTENING" -> runJs("setMode('listening')")
+                        status == "MARK LIVE — LISTENING" -> runJs("setMode('listening')")
                         status == "VOICE MODE OFF" -> {
                             voiceMode = false
                             runJs("setMode('idle');document.getElementById('micLabel').textContent='TAP TO SPEAK'")
@@ -222,7 +222,7 @@ class MainActivity : AppCompatActivity() {
                     saveUiPreference("gesture_wake", false)
                     runJs("document.getElementById('gestureWake').checked=false;showToast('SHAKE WAKE COULD NOT START')")
                 }
-            runJs("showToast('SHAKE WAKE ENABLED — KEEP JARVIS READY')")
+            runJs("showToast('SHAKE WAKE ENABLED — KEEP MARK READY')")
         } else {
             JarvisGestureWakeService.stop(this)
             runJs("showToast('SHAKE WAKE DISABLED')")
@@ -242,7 +242,7 @@ class MainActivity : AppCompatActivity() {
                     saveUiPreference("wake_word", false)
                     runJs("document.getElementById('wakeWord').checked=false;showToast('WAKE WORD COULD NOT START')")
                 }
-            runJs("showToast('WAKE WORD ENABLED — SAY JARVIS')")
+            runJs("showToast('WAKE WORD ENABLED — SAY MARK')")
         } else {
             JarvisWakeWordService.stop(this)
             runJs("showToast('WAKE WORD DISABLED')")
@@ -283,7 +283,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-            runJs("showToast('JARVIS IS ALREADY THE DEFAULT ASSISTANT')")
+            runJs("showToast('MARK IS ALREADY THE DEFAULT ASSISTANT')")
             return
         }
         defaultAssistantLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
@@ -375,7 +375,7 @@ class MainActivity : AppCompatActivity() {
         val prompt = if (memoryContext.isBlank()) {
             cleanMessage
         } else {
-            "[PRIVATE JARVIS MEMORY]\n$memoryContext\n" +
+            "[PRIVATE MARK MEMORY]\n$memoryContext\n" +
                 "Use these memories only when relevant. Do not mention this memory block unless asked. " +
                 "If a memory conflicts with the user's current message, follow the current message.\n" +
                 "[END MEMORY]\nUser: $cleanMessage"
@@ -464,7 +464,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Enable full storage access?")
-            .setMessage("This lets JARVIS list, create, edit, and delete shared-storage files. Android will ask you to approve this in Settings.")
+            .setMessage("This lets MARK list, create, edit, and delete shared-storage files. Android will ask you to approve this in Settings.")
             .setNegativeButton("CANCEL", null)
             .setPositiveButton("OPEN SETTINGS") { _, _ ->
                 runJs("showToast(${JSONObject.quote(fileManager.openFullAccessSettings().second)})")
