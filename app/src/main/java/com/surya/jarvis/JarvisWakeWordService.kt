@@ -9,9 +9,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import org.vosk.Model
@@ -26,6 +29,7 @@ import org.vosk.android.StorageService
  */
 class JarvisWakeWordService : Service() {
     companion object {
+        private const val TAG = "MARKWakeWord"
         private const val CHANNEL_ID = "jarvis_wake_word_channel"
         private const val NOTIFICATION_ID = 703
         private const val ACTION_START = "com.surya.jarvis.action.START_WAKE_WORD"
@@ -61,7 +65,21 @@ class JarvisWakeWordService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            startForeground(NOTIFICATION_ID, buildNotification("Loading offline wake model"))
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification("Loading offline wake model"),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, buildNotification("Loading offline wake model"))
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "Could not start microphone foreground service", error)
+                stopSelf()
+                return START_NOT_STICKY
+            }
             handler.post { loadModelAndListen() }
         }
         return START_NOT_STICKY
@@ -92,13 +110,17 @@ class JarvisWakeWordService : Service() {
                     speechService = SpeechService(localRecognizer, SAMPLE_RATE)
                     updateNotification("Offline wake word active — say Mark")
                     speechService?.startListening(voskListener)
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    Log.e(TAG, "Could not initialize Vosk wake-word microphone", error)
+                    updateNotification("Wake word microphone failed — reopen MARK and try again")
                     stopSelf()
                 } finally {
                     loading = false
                 }
             },
-            { _ ->
+            { error ->
+                Log.e(TAG, "Could not unpack offline wake model", error)
+                updateNotification("Wake model failed — reopen MARK and try again")
                 loading = false
                 stopSelf()
             }
