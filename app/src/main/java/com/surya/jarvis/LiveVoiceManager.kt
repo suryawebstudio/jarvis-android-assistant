@@ -206,9 +206,9 @@ class LiveVoiceManager(
                                             "You are speaking directly with the user in a live voice conversation. " +
                                             "You may open an installed app or a listed Android Settings page only when the user directly asks. You may turn the flashlight on or off with set_flashlight when requested. You may capture one still image with capture_camera_image only when the user directly asks what the camera sees; never capture continuously or secretly. " +
                                             "Android protects many system settings. For Wi-Fi and Bluetooth, open the system control panel or Settings page first. If MARK Accessibility is enabled, inspect the visible panel and tap only the exact visible Wi-Fi or Bluetooth switch the user requested; otherwise tell the user Android requires them to tap the switch. Never claim a protected setting changed unless the tool response or a follow-up screen inspection confirms it. " +
-                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. " +
+                                            "When MARK Accessibility is enabled, you may inspect and control only visible UI elements using the provided tools; it does not grant hidden access to every phone setting. inspect_visible_screen returns a snapshot_id and refs such as @a1abc123:e1. For tap, type, and scroll, always pass the exact snapshot_id and ref from the latest inspection; never guess labels or reuse an old ref. Back, Home, and overview do not need a ref. " +
                                             "For a multi-step request, first call start_task, then execute it as a task: inspect the screen before the first control action, perform one action at a time, inspect the screen again after every control action, then continue only when the result matches the intended step. Never issue multiple phone-control function calls in one turn; wait for each function response before choosing the next action. Do not stop after the first successful action unless the task is complete or a confirmation is required. " +
-                                            "Use inspect_visible_screen before guessing a target. Never claim an action succeeded unless its function response says it did. " +
+                                            "Use inspect_visible_screen before every target-dependent action. If MARK reports a stale or invalid ref, inspect again and retry with the new ref. Never claim an action succeeded unless its function response says it did. " +
                                             "For sending, deleting, purchasing, calling, sharing, posting, installing, or other consequential actions, ask the user for confirmation first and then repeat the blocked action with confirmed=true only after the user explicitly agrees. " +
                                             "For file work, MARK uses Android's full shared-storage access only. If it is not enabled, tell the user to enable Full storage access from the MARK Settings panel and Android's permission screen; do not ask the user to select a folder. Use simple file names and do not invent paths. Before delete_file, say exactly which file or folder will be permanently deleted and wait for an explicit yes, then call delete_file with confirmed=true. " +
                                             "When a tool response says confirmation is required, ask exactly one concise confirmation question in your normal MARK Live voice, then wait for the user's answer. The Android app does not speak a second local confirmation. " +
@@ -424,7 +424,7 @@ class LiveVoiceManager(
             put("name", "control_visible_screen")
             put(
                 "description",
-                "Perform one narrow action on the current visible screen: tap a visible control, type into a visible text field, scroll, or use Back, Home, or recent apps. Accessibility must be enabled by the user."
+                "Perform one narrow action on the current visible screen: tap a visible control, type into a visible text field, scroll, or use Back, Home, or recent apps. Accessibility must be enabled by the user. For tap, type, and scroll, use the exact snapshot_id and ref returned by the latest inspect_visible_screen; stale refs are rejected."
             )
             put(
                 "parameters",
@@ -434,7 +434,9 @@ class LiveVoiceManager(
                         "properties",
                         JSONObject()
                             .put("action", JSONObject().put("type", "STRING").put("enum", JSONArray().put("tap").put("type").put("scroll").put("back").put("home").put("overview")))
-                            .put("target", JSONObject().put("type", "STRING").put("description", "Exact or partial visible button, link, label, or text-field label. Leave blank for navigation actions or the focused field."))
+                            .put("snapshot_id", JSONObject().put("type", "STRING").put("description", "The snapshot_id returned by the latest inspect_visible_screen. Required for tap, type, and scroll."))
+                            .put("ref", JSONObject().put("type", "STRING").put("description", "The exact ref returned by the latest inspect_visible_screen, such as @a1abc123:e1. Required for tap, type, and scroll."))
+                            .put("target", JSONObject().put("type", "STRING").put("description", "Optional human-readable label used for confirmation context; do not use it to guess a target."))
                             .put("text", JSONObject().put("type", "STRING").put("description", "Text to type when action is type."))
                             .put("direction", JSONObject().put("type", "STRING").put("enum", JSONArray().put("up").put("down")))
                             .put("confirmed", JSONObject().put("type", "BOOLEAN").put("description", "Set true only after the user explicitly confirms a consequential action."))
@@ -654,6 +656,8 @@ class LiveVoiceManager(
                     false to "Accessibility control is not enabled. Enable MARK in Android Accessibility settings first."
                 }
                 "control_visible_screen" -> JarvisAccessibilityService.control(
+                    snapshotId = args.optString("snapshot_id"),
+                    ref = args.optString("ref"),
                     action = args.optString("action"),
                     target = args.optString("target"),
                     text = args.optString("text"),
