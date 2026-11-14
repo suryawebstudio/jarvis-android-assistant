@@ -151,9 +151,12 @@ class JarvisWakeWordService : Service() {
         if (shuttingDown) return
         shuttingDown = true
         runCatching { speechService?.cancel() }
+        // Start the microphone foreground service before destroying this
+        // detector. onDestroy() clears pending callbacks, so a delayed start
+        // here would be cancelled before it could run.
+        runCatching { JarvisVoiceForegroundService.start(this) }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        handler.postDelayed({ JarvisVoiceForegroundService.start(this) }, 250L)
     }
 
     override fun onDestroy() {

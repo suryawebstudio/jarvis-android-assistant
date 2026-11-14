@@ -27,7 +27,7 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
         private const val NOTIFICATION_ID = 702
         private const val ACTION_START = "com.surya.jarvis.action.START_GESTURE_WAKE"
         private const val ACTION_STOP = "com.surya.jarvis.action.STOP_GESTURE_WAKE"
-        private const val SHAKE_THRESHOLD = 13.5f
+        private const val SHAKE_THRESHOLD = 10.5f
         private const val SHAKE_COOLDOWN_MS = 2_000L
 
         fun start(context: Context) {
@@ -43,6 +43,7 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
     private var lastMagnitude = SensorManager.GRAVITY_EARTH
+    private var sensorRegistered = false
     private var lastShakeAt = 0L
     private val stopped = AtomicBoolean(false)
 
@@ -62,7 +63,8 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
                 if (accelerometer == null) {
                     stopSelf()
                 } else {
-                    sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME)
+                    sensorRegistered = sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME) == true
+                    if (!sensorRegistered) stopSelf()
                 }
             }
         }
@@ -90,7 +92,8 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         stopped.set(true)
-        sensorManager?.unregisterListener(this)
+        if (sensorRegistered) sensorManager?.unregisterListener(this)
+        sensorRegistered = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
