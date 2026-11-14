@@ -26,8 +26,8 @@ canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 .composer{display:flex;gap:9px;align-items:center;border:1px solid #302b21;border-radius:30px;padding:7px 8px 7px 17px;background:#111}
 .composer input{background:none;border:0;outline:none;color:white;flex:1;min-width:0;font-size:14px}
 .composer button{border:0;background:#dca927;color:#130e03;width:38px;height:38px;border-radius:50%;font-size:18px}
-.panel{position:absolute;inset:0;background:#080808f5;z-index:5;padding:24px;display:none;flex-direction:column}
-.panel.show{display:flex}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.panel{overflow:auto}
+.panel{position:absolute;inset:0;background:#080808f5;z-index:5;padding:24px;display:none;flex-direction:column;overflow-y:auto;overflow-x:hidden;touch-action:pan-y;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;will-change:scroll-position}
+.panel.show{display:flex}.panelhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex:0 0 auto}
 .panel h2{font-size:19px;letter-spacing:2px}.close{border:1px solid #333;border-radius:50%;width:38px;height:38px;color:white;background:#171717;font-size:20px}
 .messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:86%;padding:13px 16px;border-radius:17px;font-size:14px;line-height:1.5}
@@ -77,14 +77,14 @@ canvas{width:100%;height:100%;max-height:510px;display:block;touch-action:none}
 </div>
 <script>
 const canvas=document.getElementById('sphere'),ctx=canvas.getContext('2d'),visual=document.getElementById('visual');
-    let W=0,H=0,dpr=1,particles=[],rotationY=0,rotationX=0,mode='idle',effectsEnabled=true,soundEnabled=true,pointer=null,dragging=false,lastX=0,lastY=0,holdTimer=null,held=false,pressTime=0,toastTimer=null;
+    let W=0,H=0,dpr=1,particles=[],rotationY=0,rotationX=0,mode='idle',effectsEnabled=true,soundEnabled=true,pointer=null,dragging=false,lastX=0,lastY=0,holdTimer=null,held=false,pressTime=0,toastTimer=null,panelOpen=false;
 const TAU=Math.PI*2;
 function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);makeParticles()}
 function makeParticles(){particles=[];const n=950;for(let i=0;i<n;i++){const y=1-2*(i+.5)/n,a=Math.PI*(3-Math.sqrt(5))*i,rr=Math.sqrt(1-y*y);particles.push({x:Math.cos(a)*rr,y,z:Math.sin(a)*rr,size:.55+Math.random()*1.35,phase:Math.random()*TAU})}}
     function beep(){if(!soundEnabled)return;try{const a=new AudioContext(),o=a.createOscillator(),g=a.createGain();o.frequency.value=620;g.gain.value=.035;o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+.045)}catch(e){}}
     function showToast(s){const t=document.getElementById('toast');t.textContent=s;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),950)}
-function animate(){
-     requestAnimationFrame(animate);ctx.clearRect(0,0,W,H);if(!effectsEnabled)return;const now=performance.now();
+	function animate(){
+	     requestAnimationFrame(animate);if(panelOpen||!effectsEnabled){ctx.clearRect(0,0,W,H);return}const now=performance.now();
  const speaking=mode==='speaking',listening=mode==='listening';
  if(!dragging)rotationY+=speaking?.009:listening?.006:.0022;
  const pulse=speaking?1.13+Math.sin(now*.006)*.12:listening?1.055+Math.sin(now*.004)*.035:1+Math.sin(now*.0013)*.018;
@@ -118,7 +118,7 @@ window.addEventListener('resize',resize);resize();animate();
 function setMode(m){mode=m;document.getElementById('status').textContent=m==='speaking'?'MARK SPEAKING':m==='listening'?'LISTENING':m==='thinking'?'PROCESSING':'SYSTEM ONLINE';document.getElementById('hint').innerHTML=m==='speaking'?'<strong>MARK IS SPEAKING</strong>':m==='listening'?'<strong>LISTENING TO YOU</strong>':m==='thinking'?'<strong>PROCESSING REQUEST</strong>':'TOUCH THE CORE TO INTERACT';document.getElementById('mic').classList.toggle('active',m==='listening')}
 let recognition=null;
 function toggleVoice(){if(window.AndroidJarvis?.startVoice){AndroidJarvis.startVoice();return}if(mode==='listening'){recognition?.stop();setMode('idle');return}const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){alert('Speech recognition unavailable. Try Chrome or connect the Android voice bridge.');return}recognition=new Speech();recognition.lang='en-IN';recognition.onstart=()=>setMode('listening');recognition.onresult=e=>{document.getElementById('message').value=e.results[0][0].transcript;sendMessage()};recognition.onend=()=>{if(mode==='listening')setMode('idle')};recognition.onerror=()=>setMode('idle');recognition.start()}
-    function openPanel(id){document.getElementById(id).classList.add('show');if(id==='files')refreshFiles()}function closePanels(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'))}
+    function openPanel(id){panelOpen=true;document.getElementById(id).classList.add('show');if(id==='files')refreshFiles()}function closePanels(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'));panelOpen=false}
 function sendMessage(){const i=document.getElementById('message'),v=i.value.trim();if(!v)return;i.value='';addChat(v);openPanel('chat')}
 function sendChat(){const i=document.getElementById('chatInput'),v=i.value.trim();if(!v)return;i.value='';addChat(v)}
 function addUserMessage(v){const m=document.getElementById('messages'),u=document.createElement('div');u.className='msg user';u.textContent=v;m.appendChild(u);m.scrollTop=m.scrollHeight;const h=document.getElementById('historyList');if(h.querySelector('p'))h.innerHTML='';const item=document.createElement('div');item.className='historyitem';item.textContent=v;h.prepend(item)}
