@@ -13,6 +13,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
+import android.content.pm.ServiceInfo
+import android.util.Log
 import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
@@ -23,11 +25,12 @@ import kotlin.math.sqrt
  */
 class JarvisGestureWakeService : Service(), SensorEventListener {
     companion object {
+        private const val TAG = "MARKGestureWake"
         private const val CHANNEL_ID = "jarvis_gesture_channel"
         private const val NOTIFICATION_ID = 702
         private const val ACTION_START = "com.surya.jarvis.action.START_GESTURE_WAKE"
         private const val ACTION_STOP = "com.surya.jarvis.action.STOP_GESTURE_WAKE"
-        private const val SHAKE_THRESHOLD = 10.5f
+        private const val SHAKE_THRESHOLD = 6.5f
         private const val SHAKE_COOLDOWN_MS = 2_000L
 
         fun start(context: Context) {
@@ -59,12 +62,30 @@ class JarvisGestureWakeService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_STOP -> stopSelf()
             ACTION_START -> {
-                startForeground(NOTIFICATION_ID, buildNotification())
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(
+                            NOTIFICATION_ID,
+                            buildNotification(),
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        )
+                    } else {
+                        startForeground(NOTIFICATION_ID, buildNotification())
+                    }
+                } catch (error: Exception) {
+                    Log.e(TAG, "Could not start shake foreground service", error)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 if (accelerometer == null) {
+                    Log.e(TAG, "No accelerometer is available")
                     stopSelf()
                 } else {
                     sensorRegistered = sensorManager?.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME) == true
-                    if (!sensorRegistered) stopSelf()
+                    if (!sensorRegistered) {
+                        Log.e(TAG, "Accelerometer registration failed")
+                        stopSelf()
+                    }
                 }
             }
         }
