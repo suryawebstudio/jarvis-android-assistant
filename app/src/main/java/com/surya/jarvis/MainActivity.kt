@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val executor = Executors.newSingleThreadExecutor()
     private var voiceMode = false
+    private var pendingWakeWordStart = false
     private var receiverRegistered = false
     private val workerUrl = "https://jarvis-ai-backend.suryawebstudio.workers.dev"
     private val memoryStore by lazy { JarvisMemoryStore(applicationContext) }
@@ -37,15 +38,28 @@ class MainActivity : AppCompatActivity() {
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) requestNotificationThenStartVoice()
-        else runJs("showToast('MICROPHONE PERMISSION DENIED')")
+        if (!granted) {
+            pendingWakeWordStart = false
+            runJs("document.getElementById('wakeWord').checked=false;showToast('MICROPHONE PERMISSION DENIED')")
+        } else if (pendingWakeWordStart) {
+            pendingWakeWordStart = false
+            requestNotificationThenStartWakeWord()
+        } else {
+            requestNotificationThenStartVoice()
+        }
     }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) beginVoiceConversation()
-        else runJs("NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE")
+        if (pendingWakeWordStart) {
+            pendingWakeWordStart = false
+            startWakeWordListening()
+        } else if (granted) {
+            beginVoiceConversation()
+        } else {
+            runJs("showToast('NOTIFICATION PERMISSION REQUIRED FOR BACKGROUND VOICE')")
+        }
     }
 
     private val defaultAssistantLauncher = registerForActivityResult(
@@ -232,18 +246,16 @@ class MainActivity : AppCompatActivity() {
     private fun setWakeWordEnabled(enabled: Boolean) {
         if (enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             saveUiPreference("wake_word", false)
-            runJs("document.getElementById('wakeWord').checked=false;showToast('ENABLE MICROPHONE PERMISSION FIRST')")
+            pendingWakeWordStart = true
+            runJs("showToast('ALLOW MICROPHONE ACCESS TO ENABLE MARK WAKE WORD')")
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        saveUiPreference("wake_word", enabled)
         if (enabled) {
-            runCatching { JarvisWakeWordService.start(this) }
-                .onFailure {
-                    saveUiPreference("wake_word", false)
-                    runJs("document.getElementById('wakeWord').checked=false;showToast('WAKE WORD COULD NOT START')")
-                }
-            runJs("showToast('WAKE WORD ENABLED — SAY MARK')")
+            requestNotificationThenStartWakeWord()
         } else {
+            saveUiPreference("wake_word", false)
+            pendingWakeWordStart = false
             JarvisWakeWordService.stop(this)
             runJs("showToast('WAKE WORD DISABLED')")
         }
@@ -265,6 +277,28 @@ class MainActivity : AppCompatActivity() {
         } else {
             beginVoiceConversation()
         }
+    }
+
+    private fun requestNotificationThenStartWakeWord() {
+        pendingWakeWordStart = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            pendingWakeWordStart = false
+            startWakeWordListening()
+        }
+    }
+
+    private fun startWakeWordListening() {
+        saveUiPreference("wake_word", true)
+        runCatching { JarvisWakeWordService.start(this) }
+            .onFailure {
+                saveUiPreference("wake_word", false)
+                runJs("document.getElementById('wakeWord').checked=false;showToast('WAKE WORD COULD NOT START')")
+            }
+        runJs("showToast('WAKE WORD ENABLED — SAY MARK')")
     }
 
     private fun isDefaultAssistant(): Boolean =
